@@ -1,0 +1,48 @@
+{
+  "name": "ruijing-ip",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "瑞镜IP检测 — privacy-first, evidence-based IP reference intelligence",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "node scripts/local-dev.mjs",
+    "build": "node scripts/project-command.mjs build",
+    "build:pages": "node scripts/project-command.mjs build-pages",
+    "test": "node scripts/project-command.mjs test run",
+    "test:watch": "node scripts/project-command.mjs test",
+    "test:e2e": "node scripts/project-command.mjs e2e test",
+    "data:build": "node scripts/build-data.mjs",
+    "data:check": "node scripts/check-sources.mjs",
+    "preview": "node scripts/local-dev.mjs --production",
+    "worker:check": "node scripts/project-command.mjs worker deploy --dry-run --outdir .cache/worker-check",
+    "dns": "node services/authoritative-dns/server.mjs",
+    "stun": "node services/stun/server.mjs"
+  },
+  "dependencies": {
+    "dns-packet": "^5.6.1",
+    "ipaddr.js": "^2.5.0",
+    "lucide-react": "^1.63.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
+  },
+  "devDependencies": {
+    "@axe-core/playwright": "^4.14.0",
+    "@playwright/test": "^1.64.1",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/dns-packet": "^5.6.5",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "prettier": "^3.9.10",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vitest": "^5.0.5",
+    "wrangler": "^4.154.0"
+  }
+}

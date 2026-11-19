@@ -1,0 +1,30 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ruijing-ip",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-28",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "html_handling": "none",
+    "not_found_handling": "none",
+    "run_worker_first": [
+      "/*",
+      "!/",
+      "!/index.html",
+      "!/assets/*",
+      "!/favicon.svg",
+      "!/robots.txt",
+    ],
+  },
+  "observability": { "enabled": false },
+  "vars": {
+    "ROUTING_NODES": "[]",
+    "FAMILY_ENDPOINTS": "{}",
+    "ALLOWED_ECHO_ORIGINS": "[]",
+    "ALLOWED_APP_ORIGINS": "[]",
+    "DNS_PUBLIC_VERIFIED": "false",
+    "USE_BUNDLED_SNAPSHOT": "true",
+  },
+}

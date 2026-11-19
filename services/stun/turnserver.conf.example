@@ -1,0 +1,16 @@
+# Optional production alternative: coturn (BSD-3-Clause), on an already available free host.
+# Verify its current release, security advisories and host cost before installation.
+# Replace the documentation address. Nothing starts automatically.
+listening-ip=127.0.0.1
+listening-port=3478
+stun-only
+no-software-attribute
+no-cli
+no-tls
+no-dtls
+no-multicast-peers
+# Disable persistent logs. Check your packaging/systemd defaults for additional logging.
+log-file=/dev/null
+no-stdout-log
+# Anonymous Binding remains a potential UDP reflector. Apply source filtering,
+# packet-rate and bandwidth limits at the host firewall; do not enable TURN.

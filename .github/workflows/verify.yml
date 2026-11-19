@@ -1,0 +1,33 @@
+name: Verify source and application
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    # Standard hosted Ubuntu only. Public repositories receive free standard-runner compute.
+    # Private repositories require an independently verified zero-spend account configuration.
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      npm_config_cache: ${{ github.workspace }}/.cache/npm
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.cache/browsers
+      WRANGLER_SEND_METRICS: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts
+      - run: node scripts/build-data.mjs --profile=quick
+      - run: npm test
+      - run: npm run build
+      - run: node scripts/check-budget.mjs
+      # No deployment token, no paid/larger runner, no persistent artifact/cache upload.

@@ -1,0 +1,27 @@
+name: Public upstream availability (does not update deployment)
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 3 * * *'
+permissions:
+  contents: read
+concurrency:
+  group: upstream-check
+  cancel-in-progress: false
+jobs:
+  check:
+    if: github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: node scripts/check-sources.mjs
+      - if: always() && vars.WORKER_API_BASE != ''
+        run: node scripts/check-published.mjs
+        env:
+          WORKER_API_BASE: ${{ vars.WORKER_API_BASE }}
+          PAGES_ORIGIN: ${{ vars.PAGES_ORIGIN }}
+      # Never commit generated data, create issues, call deployment APIs, or upload artifacts.

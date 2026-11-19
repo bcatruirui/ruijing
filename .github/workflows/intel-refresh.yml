@@ -1,0 +1,83 @@
+name: Refresh and verify public IP intelligence
+on:
+  schedule:
+    - cron: '17 */2 * * *'
+  workflow_dispatch:
+    inputs:
+      bootstrap:
+        description: 'First deployment only: allow a missing published API'
+        type: boolean
+        default: false
+      publish_code:
+        description: 'Publish Worker code even when the dataset version has not changed'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: ruijing-intelligence-release
+  cancel-in-progress: false
+jobs:
+  refresh:
+    if: github.event.repository.private == false && github.ref_name == github.event.repository.default_branch && vars.INTEL_REFRESH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: ruijing-worker
+    env:
+      WORKER_API_BASE: ${{ vars.WORKER_API_BASE }}
+      PAGES_ORIGIN: ${{ vars.PAGES_ORIGIN }}
+      npm_config_cache: ${{ github.workspace }}/.cache/npm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/cache/restore@v4
+        if: vars.INTEL_FREE_CACHE_ENABLED == 'true'
+        with:
+          path: |
+            data/cache
+            data/generated
+          key: ruijing-intel-v3-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ruijing-intel-v3-
+      - run: npm ci --ignore-scripts
+      - run: node scripts/refresh-data.mjs
+      - run: npm test
+      - run: npm run build
+      - run: npm run worker:check
+      - id: version
+        if: vars.INTEL_RELEASE_ENABLED == 'true'
+        run: |
+          test -n "$PAGES_ORIGIN"
+          if [ "$BOOTSTRAP" = 'true' ]; then
+            node scripts/check-published.mjs --candidate --bootstrap
+          else
+            node scripts/check-published.mjs --candidate
+          fi
+        env:
+          BOOTSTRAP: ${{ inputs.bootstrap }}
+      - if: vars.INTEL_RELEASE_ENABLED == 'true' && (steps.version.outputs.changed == 'true' || inputs.publish_code == true)
+        run: |
+          test -n "$CLOUDFLARE_API_TOKEN" && test -n "$CLOUDFLARE_ACCOUNT_ID"
+          allowed=$(node -e 'console.log(JSON.stringify([...new Set([process.env.PAGES_ORIGIN, process.env.PAGES_PREVIEW_ORIGIN].filter(Boolean))]))')
+          node scripts/project-command.mjs worker deploy --var "ALLOWED_APP_ORIGINS:$allowed" --var "DNS_PUBLIC_VERIFIED:$DNS_PUBLIC_VERIFIED"
+          for wait in 0 8 16; do
+            sleep "$wait"
+            if node scripts/check-published.mjs --match; then exit 0; fi
+          done
+          echo 'The previous Worker version is available for manual rollback in Cloudflare.'
+          exit 1
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          DNS_PUBLIC_VERIFIED: ${{ vars.DNS_PUBLIC_VERIFIED == 'true' && 'true' || 'false' }}
+          PAGES_PREVIEW_ORIGIN: https://${{ github.repository_owner }}.github.io
+      - uses: actions/cache/save@v4
+        if: vars.INTEL_FREE_CACHE_ENABLED == 'true'
+        with:
+          path: |
+            data/cache
+            data/generated
+          key: ruijing-intel-v3-${{ github.run_id }}-${{ github.run_attempt }}

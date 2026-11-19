@@ -1,0 +1,50 @@
+name: Publish Ruijing frontend to GitHub Pages
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: ruijing-pages
+  cancel-in-progress: false
+jobs:
+  pages:
+    if: github.event.repository.private == false && github.ref_name == 'main' && vars.WORKER_API_BASE != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment:
+      name: github-pages
+      url: ${{ steps.publish.outputs.page_url }}
+    env:
+      VITE_API_BASE: ${{ vars.WORKER_API_BASE }}
+      WORKER_API_BASE: ${{ vars.WORKER_API_BASE }}
+      VITE_DNS_PROBE_ZONE: ${{ vars.DNS_PROBE_ZONE }}
+      VITE_ROUTING_ORIGINS: ${{ vars.ROUTING_ORIGINS }}
+      npm_config_cache: ${{ github.workspace }}/.cache/npm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - id: pages
+        uses: actions/configure-pages@v5
+      - run: npm ci --ignore-scripts
+      - run: |
+          test -n "$PAGES_ORIGIN"
+          node scripts/check-published.mjs
+          npm run build:pages
+          node scripts/check-pages.mjs
+        env:
+          PAGES_ORIGIN: ${{ steps.pages.outputs.origin }}
+          PAGES_BASE: ${{ steps.pages.outputs.base_path }}/
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist-pages
+          retention-days: 1
+      - id: publish
+        uses: actions/deploy-pages@v4
