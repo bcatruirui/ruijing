@@ -40,7 +40,7 @@ jobs:
           npm run build:pages
           node scripts/check-pages.mjs
         env:
-          PAGES_ORIGIN: ${{ steps.pages.outputs.origin }}
+          PAGES_ORIGIN: https://${{ steps.pages.outputs.host }}
           PAGES_BASE: ${{ steps.pages.outputs.base_path }}/
       - uses: actions/upload-pages-artifact@v3
         with:
