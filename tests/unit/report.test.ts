@@ -84,6 +84,21 @@ describe("detection report boundaries", () => {
     expect(timezoneCountries("Asia/Calcutta")).toContain("IN");
   });
 
+  it("removes location, browser signals and check time from either language of a shared report", () => {
+    const report = fixture("self", "hosting", "JP");
+    const alternate = fixture("lookup", "mobile", "CN", "1.1.1.1");
+    for (const lang of ["zh", "en"] as const) {
+      const view = reportView(report, lang, { timezone: "Asia/Shanghai", alternate });
+      const detailed = reportText(report, view);
+      const shared = reportText(report, view, lang);
+      for (const privateValue of [report.info.ip, "Example city", "Asia/Shanghai", instant, view.judgment]) {
+        expect(detailed).toContain(privateValue);
+        expect(shared).not.toContain(privateValue);
+      }
+      expect(shared).toContain(view.scoreLabel);
+    }
+  });
+
   it("requires two distinct query observations before marking a known path unexpected", () => {
     const expected = expectedResolvers("AS13335, 1.1.1.0/24")!;
     const observed = { ip: "8.8.8.8", firstObservedAt: instant, lastObservedAt: instant, types: ["A"], probeCount: 2 };

@@ -178,6 +178,24 @@ test("diagnostics distinguish the lookup from browser checks, and clear current 
   await expect(page.getByRole("region", { name: "IP 纯净值" })).toContainText("等待检测");
   await expect(diagnostics).toHaveCount(0);
 });
+test("direct information pages do not contact the detection API", async ({ page }) => {
+  const apiRequests: string[] = [];
+  page.on("request", request => {
+    const pathname = new URL(request.url()).pathname;
+    if (pathname.startsWith("/api/")) apiRequests.push(pathname);
+  });
+  for (const path of ["/privacy/", "/methodology/", "/data-sources/"]) {
+    await page.goto(path);
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    expect(apiRequests).toEqual([]);
+  }
+  const homeCheck = page.waitForRequest(request => new URL(request.url()).pathname === "/api/self");
+  await page.getByRole("button", { name: "关闭", exact: true }).click();
+  await expect(page).toHaveURL(/\/$/);
+  expect(new URL((await homeCheck).url()).pathname).toBe("/api/self");
+});
+
 test("real offline report, exports, privacy, themes, language and layout", async ({
   page,
   context,
@@ -255,6 +273,45 @@ test("real offline report, exports, privacy, themes, language and layout", async
       (await readFile("reports/exports/report.pdf")).subarray(0, 4).toString(),
     ).toBe("%PDF");
   }
+  const share = page.getByRole("checkbox", { name: "脱敏分享" });
+  await share.check();
+  await expect(page.locator(".ip-address")).toContainText("8.8.8.8");
+  const exportedText: string[] = [];
+  await page.exposeFunction("recordSharedText", (text: string) => { exportedText.push(text); });
+  await page.evaluate(() => {
+    const record = (window as unknown as { recordSharedText: (text: string) => Promise<void> }).recordSharedText;
+    Object.defineProperty(navigator.clipboard, "writeText", { value: record });
+    const fillText = CanvasRenderingContext2D.prototype.fillText;
+    CanvasRenderingContext2D.prototype.fillText = function (text, ...args) {
+      void record(text);
+      fillText.call(this, text, ...args);
+    };
+  });
+  await page.getByRole("button", { name: "复制摘要", exact: true }).click();
+  await expect(page.getByText("已复制到剪贴板")).toBeVisible();
+  expect(exportedText[0]).toContain("IP 已隐藏");
+  const shareImage = page.waitForEvent("download");
+  await page.getByRole("button", { name: "PNG", exact: true }).click();
+  expect((await readFile((await (await shareImage).path())!)).subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+  await expect.poll(() => exportedText.slice(1)).toContain("IP 已隐藏");
+  const sharedDownload = page.waitForEvent("download");
+  await page.getByRole("button", { name: "JSON", exact: true }).click();
+  const sharedJson = await readFile((await (await sharedDownload).path())!, "utf8");
+  expect(JSON.parse(sharedJson).summary.ip).toBe("IP 已隐藏");
+  for (const privateValue of ["8.8.8.8", "Mountain View", data.generatedAt]) {
+    expect(sharedJson).not.toContain(privateValue);
+    expect(exportedText.join("\n")).not.toContain(privateValue);
+  }
+  await page.emulateMedia({ media: "print" });
+  const print = page.getByRole("article", { name: "脱敏分享报告" });
+  await expect(print).toBeVisible();
+  await expect(page.locator(".ip-address")).toBeHidden();
+  await expect(print).not.toContainText(/8\.8\.8\.8|Mountain View|California/);
+  if (testInfo.project.name === "chromium-desktop") {
+    expect((await page.pdf({ format: "A4" })).subarray(0, 4).toString()).toBe("%PDF");
+  }
+  await page.emulateMedia({ media: "screen" });
+  await share.uncheck();
   await page.getByRole("button", { name: "了解评分规则" }).click();
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Tab");

@@ -118,7 +118,12 @@ const threatCategories = new Set([
 ]);
 const CHECK_TIMEOUT_MS = 12_000;
 const SLOW_SELF_CHECK_MS = 3_000;
+const standalonePolicy = (pathname: string) =>
+  /\/privacy\/?$/.test(pathname) ? "privacy"
+    : /\/methodology\/?$/.test(pathname) ? "scoring"
+    : /\/data-sources\/?$/.test(pathname) ? "sources" : null;
 export function App() {
+  const [initialPolicy] = useState(() => standalonePolicy(location.pathname));
   const [lang, setLang] = useState<Lang>(() =>
       readPreference("ruijing-language", "zh") === "en" ? "en" : "zh",
     ),
@@ -131,18 +136,11 @@ export function App() {
     [egress, setEgress] = useState<Pick<IpReport["info"], "ip" | "family"> | null>(null),
     [input, setInput] = useState(""),
     [hidden, setHidden] = useState(false),
-    [loading, setLoading] = useState(true),
+    [redactShare, setRedactShare] = useState(false),
+    [loading, setLoading] = useState(!initialPolicy),
     [error, setError] = useState(""),
     [toast, setToast] = useState(""),
-    [policy, setPolicy] = useState<string | null>(() =>
-      /\/privacy\/?$/.test(location.pathname)
-        ? "privacy"
-        : /\/methodology\/?$/.test(location.pathname)
-          ? "scoring"
-          : /\/data-sources\/?$/.test(location.pathname)
-            ? "sources"
-            : null,
-    );
+    [policy, setPolicy] = useState<string | null>(initialPolicy);
   const [scan, setScan] = useState(0);
   const [dns, setDns] = useState<DnsLeakResult | null>(null);
   const [dnsProgress, setDnsProgress] = useState<DnsProgress | null>(null);
@@ -205,6 +203,7 @@ export function App() {
     };
   }, []);
   useEffect(() => {
+    if (initialPolicy) return;
     void query();
     const capabilityRequest = new AbortController();
     const timeout = setTimeout(() => capabilityRequest.abort(), CHECK_TIMEOUT_MS);
@@ -237,13 +236,17 @@ export function App() {
       alternateController.current?.abort();
     };
   }, []);
+  function closePolicy() {
+    if (initialPolicy) location.assign(assetPath(""));
+    else setPolicy(null);
+  }
   useEffect(() => {
     if (!policy) return;
     const previous = document.activeElement as HTMLElement | null,
       overflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setPolicy(null);
+      if (event.key === "Escape") closePolicy();
       if (event.key === "Tab") {
         const elements = [
           ...document.querySelectorAll<HTMLElement>(
@@ -367,6 +370,7 @@ export function App() {
     hidden, dns, dnsReady, alternate,
     timezone: self ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined,
   });
+  const shareLanguage = redactShare || hidden ? lang : undefined;
   const purity = view?.score ?? null;
 
   async function dnsTest(expected: string[]) {
@@ -491,7 +495,12 @@ export function App() {
           </div>
         </div>
       </header>
-      <main className="shell" id="main" inert={Boolean(policy)} data-redacted={hidden || undefined}>
+      <main className="shell" id="main" inert={Boolean(policy)} data-redacted={shareLanguage ? true : undefined}>
+        {shareLanguage && report && view && (
+          <article className="share-report-print" aria-label={t("脱敏分享报告", "Redacted share report")}>
+            <pre>{reportText(report, view, shareLanguage)}</pre>
+          </article>
+        )}
         <section className="intro result-intro">
           <div>
             <h1>{t("看清连接", "See your connection")}</h1>
@@ -624,12 +633,16 @@ export function App() {
               {self && dnsReady && <a href="#dns">{t(dnsBusy ? "查看 DNS 检测进度" : "运行 DNS 检测", dnsBusy ? "View DNS progress" : "Run DNS check")}</a>}
             </div>
             <div className="export-group">
+              <label className="share-option" title={t("分享时隐藏 IP、位置、时区和检测时间", "Hide IP, location, time zone and check time in shared reports")}>
+                <input type="checkbox" checked={Boolean(shareLanguage)} disabled={hidden} onChange={e => setRedactShare(e.target.checked)} />
+                {t("脱敏分享", "Redact exports")}
+              </label>
               <button className="icon-button" disabled={!view} aria-label={t("复制摘要", "Copy summary")}
-                onClick={() => report && view && void copy(reportText(report, view))}><Clipboard size={16} /></button>
+                onClick={() => report && view && void copy(reportText(report, view, shareLanguage))}><Clipboard size={16} /></button>
               <button className="icon-button" disabled={!view} aria-label="JSON"
-                onClick={() => report && view && saveJson(report, view, hidden)}><FileJson size={16} /></button>
+                onClick={() => report && view && saveJson(report, view, shareLanguage)}><FileJson size={16} /></button>
               <button className="icon-button" disabled={!view} aria-label="PNG"
-                onClick={() => report && view && savePng(report, view)}><ArrowDownToLine size={16} /></button>
+                onClick={() => report && view && savePng(report, view, shareLanguage)}><ArrowDownToLine size={16} /></button>
               <button className="button secondary" disabled={!view} onClick={() => window.print()}><FileText size={15} /> PDF</button>
             </div>
           </div>}
@@ -1140,7 +1153,7 @@ export function App() {
         </div>
       )}
       {policy && (
-        <div className="modal-backdrop" onClick={() => setPolicy(null)}>
+        <div className="modal-backdrop" onClick={closePolicy}>
           <section
             role="dialog"
             aria-modal="true"
@@ -1155,7 +1168,7 @@ export function App() {
             <button
               className="icon-button modal-close"
               aria-label={t("关闭", "Close")}
-              onClick={() => setPolicy(null)}
+              onClick={closePolicy}
               autoFocus
             >
               <X size={20} />

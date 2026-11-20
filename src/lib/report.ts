@@ -44,7 +44,7 @@ function resultPurity(report: IpReport): PurityAssessment & { score: number } {
 
 export function reportView(
   report: IpReport, lang: ReportLanguage,
-  context: { hidden?: boolean; timezone?: string; dns?: DnsLeakResult | null; dnsReady?: boolean; alternate?: IpReport | null } = {},
+  context: { hidden?: boolean; share?: boolean; timezone?: string; dns?: DnsLeakResult | null; dnsReady?: boolean; alternate?: IpReport | null } = {},
 ) {
   const t = (zh: string, en: string) => lang === "zh" ? zh : en;
   const { info, assessment } = report;
@@ -53,7 +53,7 @@ export function reportView(
   const localize = (code: string) => new Intl.DisplayNames([lang], { type: "region" }).of(code) ?? code;
   const country = info.countryCode && /^[A-Z]{2}$/.test(info.countryCode) ? localize(info.countryCode) : info.country;
   const place = [...new Set([country, info.region, info.city].filter(Boolean))].join(" · ");
-  const timezone = self ? context.timezone : undefined;
+  const timezone = self && !context.share ? context.timezone : undefined;
   const territories = timezoneCountries(timezone);
   const candidate = territories.length === 1 ? territories[0] : undefined;
   const access = (another: IpReport) =>
@@ -124,7 +124,7 @@ export function reportView(
     (evidence.evaluation === undefined && assessment.hasThreatEvidence && !evidence.stale)).length;
   const rows = [
     { label: t("网络属性", "Network"), value: classification + (purity.status === "conflict" ? t(" · 来源存在分歧", " · sources disagree") : ""), tone: proxy || hosting || hostingHint || purity.status === "conflict" ? "caution" : "default" },
-    ...(self ? [{
+    ...(self && !context.share ? [{
       label: t("时区与 DNS", "Time zone & DNS"),
       value: `${timezone ?? t("时区未知", "Time zone unavailable")} · DNS ${dnsText}`,
       tone: dns?.verdict === "unexpected" ? "caution" : "default",
@@ -141,8 +141,8 @@ export function reportView(
     scoreLabel: t("IP 纯净值", "IP purity score"),
     score, scoreState, riskTier, provisional, scoreDeductions,
     riskEvidenceConfidence: confidenceNames[assessment.confidence][lang],
-    ip: context.hidden ? t("IP 已隐藏", "IP hidden") : info.ip,
-    location, judgment, network: networkLabel, rows, checked,
+    ip: context.hidden || context.share ? t("IP 已隐藏", "IP hidden") : info.ip,
+    location: context.share ? "" : location, judgment, network: networkLabel, rows, checked,
   };
 }
 export type ReportView = ReturnType<typeof reportView>;
@@ -155,15 +155,16 @@ function download(blob: Blob, name: string) {
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
-export function saveJson(report: IpReport, view: ReportView, hidden: boolean) {
+export function saveJson(report: IpReport, view: ReportView, shareLanguage?: ReportLanguage) {
   const purity = resultPurity(report);
-  const body = hidden ? {
-    mode: report.mode, generatedAt: report.generatedAt, purity, summary: view,
+  const body = shareLanguage ? {
+    mode: report.mode, purity, summary: reportView(report, shareLanguage, { share: true }),
     assessment: { riskScore: report.assessment.riskScore, datasetVersion: report.assessment.datasetVersion, modelVersion: report.assessment.modelVersion },
   } : { ...report, purity, summary: view };
   download(new Blob([JSON.stringify(body, null, 2)], { type: "application/json" }), "ruijing-ip-report.json");
 }
-export function reportText(report: IpReport, view: ReportView) {
+export function reportText(report: IpReport, detailedView: ReportView, shareLanguage?: ReportLanguage) {
+  const view = shareLanguage ? reportView(report, shareLanguage, { share: true }) : detailedView;
   return [
     "瑞镜 IP / Ruijing IP",
     view.ip,
@@ -171,23 +172,22 @@ export function reportText(report: IpReport, view: ReportView) {
     ...view.scoreDeductions,
     "",
     view.title,
-    view.location,
-    view.judgment,
+    ...(shareLanguage ? [] : [view.location, view.judgment]),
     ...view.rows.map(row => `${row.label} · ${row.value}`),
     "",
     `${report.assessment.modelVersion} · ${report.assessment.datasetVersion}`,
-    report.generatedAt,
-    ...(report.info.geoSource === "DB-IP City Lite" ? ["Geolocation by DB-IP · https://db-ip.com/"] : []),
+    ...(shareLanguage ? [] : [report.generatedAt]),
+    ...(!shareLanguage && report.info.geoSource === "DB-IP City Lite" ? ["Geolocation by DB-IP · https://db-ip.com/"] : []),
   ].join("\n");
 }
-export function savePng(report: IpReport, view: ReportView) {
+export function savePng(report: IpReport, view: ReportView, shareLanguage?: ReportLanguage) {
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Canvas unavailable");
   canvas.width = 1400;
   const font = '30px system-ui, "Microsoft YaHei", sans-serif';
   context.font = font;
-  const rows = reportText(report, view).split("\n").flatMap(text => {
+  const rows = reportText(report, view, shareLanguage).split("\n").flatMap(text => {
     const lines: string[] = [];
     let line = "";
     for (const letter of text) {

@@ -16,6 +16,8 @@
 1. 在仓库 **Settings → Pages** 选择 **GitHub Actions**。确认 Worker 已接受目标前端 Origin，在 **Settings → Secrets and variables → Actions → Variables** 将 `WORKER_API_BASE` 设置为 `https://api-ip.ruirui.uk`。之后推送 `main` 自动部署，也可从 Actions 手动运行 **Publish Ruijing frontend to GitHub Pages**。
 2. 在 GitHub 账号 **Settings → Pages** 验证 `ip.ruirui.uk`。将 GitHub 提供的验证 TXT 记录加到 Cloudflare 并保留。在 `bcatruirui/ruijing` 仓库的 **Settings → Pages → Custom domain** 保存 `ip.ruirui.uk`，将 Cloudflare 的 `ip` CNAME 指向 `bcatruirui.github.io`，设置为 **仅 DNS**。父域 DNS 和个人网站配置保持原样。证书签发后勾选 **Enforce HTTPS**。
 3. Pages 工作流读取实际域名和资源根路径。切换域名后手动再运行一次 Pages 工作流，让资源从 `/ruijing/assets/` 切换到 `/assets/`。GitHub Actions 发布通过仓库设置管理域名。本地分别以 `PAGES_BASE=/ruijing/` 和 `PAGES_BASE=/` 设置 `VITE_API_BASE`，运行 `npm run build:pages` 与 `node scripts/check-pages.mjs`。
+
+正式站防嵌入由 HTTP 响应头提供。保留 `ip` 的 GitHub Pages CNAME 目标，在 Cloudflare 创建仅匹配 `http.host eq "ip.ruirui.uk"` 的响应头转换规则，设置 `Content-Security-Policy: frame-ancestors 'none'` 和 `X-Frame-Options: DENY`。确认边缘证书有效、代理回源使用 HTTPS 且校验源站证书后，再将该 CNAME 改为代理模式。发布验收应检查正式域名首页与说明页的响应头、HTTPS 和检测 API。若代理切换导致访问异常，将该记录恢复为仅 DNS。HTML 中的 CSP 仍负责限制前端资源加载。
 4. 确认 Actions 部署成功，再验证正式 HTTPS 首页、隐私、评分说明和来源入口、IP 自查与 IPv4/IPv6 查询。检查 DNS 能力显示暂不可用。Pages 产物仅含静态页面和公共资源，使用 HTML CSP 和 Referrer Policy。
 
 自定义域名切换时先更新 Worker 的 `ALLOWED_APP_ORIGINS`，再切换 Pages 域名。DNS 探测使用独立子域，可按 [公网 DNS 上线清单](docs/DNS_LAUNCH.md) 单独启用。WebRTC 公网 STUN、真正单地址族端点与受控分流节点分别通过 [架构配置](docs/ARCHITECTURE.md) 启用。
