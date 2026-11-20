@@ -179,7 +179,7 @@ describe("public purity evidence gate", () => {
     const clear = [threatSource("b", { limitedCoverage: true }), threatSource("c", { limitedCoverage: true })];
     const residential = classified("residential", clear);
     expect(assessPurity(residential, 4)).toMatchObject({ score: 85, coverage: "limited", checked: 2, independentSources: 2, limit: "threat_coverage" });
-    expect(assessPurity(residential, 4, true)).toMatchObject({ score: 75, reservedPoints: 25, status: "conflict" });
+    expect(assessPurity(residential, 4, true)).toMatchObject({ score: 80, reservedPoints: 20, status: "conflict" });
     expect(assessPurity(classified("business", clear), 4).score).toBe(85);
   });
 
@@ -196,7 +196,7 @@ describe("public purity evidence gate", () => {
     const residential = evidence("home", { category: "network", networkType: "residential", confidence: "low" });
     const weak = assessRisk(input({ networkType: "residential", evidence: [residential], sources }));
     expect(weak.networkType).toBe("unknown");
-    expect(assessPurity(weak, 4)).toMatchObject({ score: 75, coverage: "sufficient", limit: "network" });
+    expect(assessPurity(weak, 4)).toMatchObject({ score: 80, reservedPoints: 20, coverage: "sufficient", limit: "network" });
 
     const prefix = evidence("cloud", {
       sourceId: "cloud", upstreamFamily: "cloud", category: "network", networkType: "cloud",

@@ -149,7 +149,7 @@ export type PurityAssessment = PurityScoreFields & (
   | { modelVersion: "ruijing-purity-1" }
   | { modelVersion: "ruijing-purity-2" | "ruijing-purity-3" | "ruijing-purity-4"; coverage: "none" | "limited" | "sufficient" }
   | { modelVersion: "ruijing-purity-5"; coverage: "none" | "limited" | "sufficient"; reason?: "network" | "threat_coverage" }
-  | { modelVersion: "ruijing-purity-6"; score: number; coverage: "none" | "limited" | "sufficient"; limit?: PurityLimit; reservedPoints: number }
+  | { modelVersion: "ruijing-purity-6" | "ruijing-purity-7"; score: number; coverage: "none" | "limited" | "sufficient"; limit?: PurityLimit; reservedPoints: number }
 );
 export interface IpInfo {
   ip: string;

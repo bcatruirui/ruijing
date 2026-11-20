@@ -98,8 +98,8 @@ export function reportView(
   const checked = purity.checked;
   const score = purity.score;
   const tier = purityTier(score);
-  const reserved = purity.modelVersion === PURITY_MODEL_VERSION ? purity.reservedPoints : 0;
-  const limit = purity.modelVersion === PURITY_MODEL_VERSION ? purity.limit : undefined;
+  const reserved = "reservedPoints" in purity ? purity.reservedPoints : 0;
+  const limit = "reservedPoints" in purity ? purity.limit : undefined;
   const provisional = reserved > 0;
   const riskTier = provisional ? null : tier?.key ?? null;
   const scoreState = provisional ? t("证据待补充", "Evidence pending") : tier?.label[lang] ?? "";

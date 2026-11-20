@@ -1,10 +1,10 @@
 import type { PurityLimit } from "./contracts.ts";
 
-export const PURITY_MODEL_VERSION = "ruijing-purity-6";
+export const PURITY_MODEL_VERSION = "ruijing-purity-7";
 export const PURITY_CEILINGS: Record<PurityLimit, number> = {
   no_threat_checks: 50,
-  network_conflict: 75,
-  network: 75,
+  network_conflict: 80,
+  network: 80,
   threat_coverage: 85,
 };
 

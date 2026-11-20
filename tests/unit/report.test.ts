@@ -56,15 +56,15 @@ describe("detection report boundaries", () => {
   });
   it("shows a weak hosting clue separately from confirmed deductions", () => {
     const report = fixture("lookup", "unknown", "US");
-    report.purity = { modelVersion: "ruijing-purity-6", score: 75, status: "insufficient", checked: 1, independentSources: 1, coverage: "limited", limit: "network", reservedPoints: 25 };
+    report.purity = { modelVersion: "ruijing-purity-7", score: 80, status: "insufficient", checked: 1, independentSources: 1, coverage: "limited", limit: "network", reservedPoints: 20 };
     report.assessment.evidence.push({
       id: "weak-hosting", sourceId: "openasn", sourceName: "OpenASN", upstreamFamily: "openasn-core",
       sourceUrl: "https://github.com/openasn/openasn", category: "network", value: "hosting",
       confidence: "low", networkType: "hosting", description: { zh: "测试线索", en: "Test clue" },
     });
     expect(reportView(report, "zh")).toMatchObject({
-      score: 75, riskTier: null, network: "疑似机房 · OpenASN 提供低置信线索",
-      scoreDeductions: ["网络用途待核实，预留 25 分"],
+      score: 80, riskTier: null, network: "疑似机房 · OpenASN 提供低置信线索",
+      scoreDeductions: ["网络用途待核实，预留 20 分"],
     });
     report.assessment.evidence[0].stale = true;
     expect(reportView(report, "zh").network).toBe("类型未知");
