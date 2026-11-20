@@ -1,6 +1,6 @@
 import type { PurityLimit } from "./contracts.ts";
 
-export const PURITY_MODEL_VERSION = "ruijing-purity-7";
+export const PURITY_MODEL_VERSION = "ruijing-purity-8";
 export const PURITY_CEILINGS: Record<PurityLimit, number> = {
   no_threat_checks: 50,
   network_conflict: 80,
@@ -8,9 +8,9 @@ export const PURITY_CEILINGS: Record<PurityLimit, number> = {
   threat_coverage: 85,
 };
 
-export function scoreWithLimit(riskScore: number | null, limit?: PurityLimit) {
+export function scoreWithLimit(riskScore: number | null, limit?: PurityLimit, historicalRiskPoints = 0) {
   const evidenceScore = 100 - (riskScore ?? 0);
-  const score = Math.min(evidenceScore, limit ? PURITY_CEILINGS[limit] : 100);
+  const score = limit ? Math.min(evidenceScore, Math.max(0, PURITY_CEILINGS[limit] - historicalRiskPoints)) : evidenceScore;
   return { score, reservedPoints: evidenceScore - score };
 }
 

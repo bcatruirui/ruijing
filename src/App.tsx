@@ -763,14 +763,12 @@ export function App() {
                   <summary>
                     <span className="badge neutral">{e.category}</span>
                     <strong>{e.sourceName}</strong>
-                    <span className="muted">
+                    <span className="evidence-status" data-state={e.evaluation ?? (e.stale ? "stale" : undefined)}>
                       {e.stale
                         ? t("已过期", "Stale")
-                        : threatCategories.has(e.category)
-                          ? e.observedAt
-                            ? date(e.observedAt)
-                            : t("活动时间未知", "Activity date unknown")
-                          : date(e.observedAt || e.publishedAt || e.fetchedAt)}
+                        : e.evaluation === "valid" ? t("有效", "Valid")
+                        : e.evaluation === "invalid" ? t("未通过校验", "Unverified")
+                        : t("状态未知", "Unknown")}
                     </span>
                     <ChevronDown size={14} />
                   </summary>
@@ -789,6 +787,14 @@ export function App() {
                       <dd>{e.confidence}</dd>
                       <dt>{t("快照时间", "Snapshot date")}</dt>
                       <dd>{date(e.publishedAt || e.fetchedAt)}</dd>
+                      {threatCategories.has(e.category) && <>
+                        <dt>{t("活动时间", "Activity date")}</dt>
+                        <dd>{e.observedAt ? date(e.observedAt) : t("来源未提供", "Not supplied")}</dd>
+                      </>}
+                      {e.expiresAt && <>
+                        <dt>{t("来源到期时间", "Source expires")}</dt>
+                        <dd>{date(e.expiresAt)}</dd>
+                      </>}
                     </dl>
                     <a
                       href={e.sourceUrl}
@@ -1166,8 +1172,8 @@ export function App() {
               <>
                 <p>
                   {t(
-                    "每次完成检测都会给分。先扣除已确认的网络和风险信号，再按证据覆盖限制最高分。满分要求有效的网络分类，以及至少两个独立且覆盖足够的风险来源完成查验且无命中。",
-                    "Every completed check receives a score. Verified signals deduct points and available evidence determines the maximum. A full score requires a confirmed network type and no hits from two independent threat sources with sufficient coverage.",
+                    "每次完成检测都会给分。已确认的网络与有效风险信号按规则扣分，证据覆盖决定分数上限。通过校验的过期 IP 风险记录按较低权重另扣，最多 15 分。",
+                    "Every completed check receives a score. Verified network and current threat signals deduct points, and coverage caps the result. Verified historical IP threat records can deduct up to 15 points at a lower weight.",
                   )}
                 </p>
                 <ul className="purity-scale" aria-label={t("纯净值分档", "Purity score bands")}>

@@ -15,7 +15,7 @@ import type {
 import { containsIp, requirePublicIp, type ParsedIp } from "./ip.ts";
 import { PURITY_MODEL_VERSION, purityTier, scoreWithLimit } from "./purity-scale.ts";
 
-export const MODEL_VERSION = "ruijing-evidence-2.2.0";
+export const MODEL_VERSION = "ruijing-evidence-2.3.0";
 const DAY = 86_400_000;
 const text = (zh: string, en: string): LocalizedText => ({ zh, en });
 
@@ -86,12 +86,12 @@ function isPositive(evidence: Evidence): boolean {
   return evidence.value !== false && evidence.value !== "";
 }
 
-function sourceUsable(
+function sourceMetadataUsable(
   source: SourceStatus,
   family: 4 | 6,
   now: number,
 ): boolean {
-  if (source.state !== "ready" || !source.families.includes(family))
+  if ((source.state !== "ready" && source.state !== "stale") || !source.families.includes(family))
     return false;
   if (!source.license.trim() || !source.upstreamFamilies.length) return false;
   for (const field of [source.publishedAt, source.fetchedAt]) {
@@ -102,9 +102,14 @@ function sourceUsable(
   }
   if (source.expiresAt !== undefined) {
     const expiry = timestamp(source.expiresAt);
-    if (expiry === null || expiry <= now) return false;
+    if (expiry === null) return false;
   }
   return true;
+}
+
+function sourceUsable(source: SourceStatus, family: 4 | 6, now: number): boolean {
+  return source.state === "ready" && sourceMetadataUsable(source, family, now) &&
+    (source.expiresAt === undefined || timestamp(source.expiresAt)! > now);
 }
 
 type Eligibility = "valid" | "stale" | "invalid";
@@ -114,8 +119,7 @@ function evidenceEligibility(
   ip: ParsedIp,
   now: number,
 ): Eligibility {
-  if (evidence.stale || source?.state === "stale") return "stale";
-  if (!source || !sourceUsable(source, ip.family, now) || !isPositive(evidence))
+  if (!source || !sourceMetadataUsable(source, ip.family, now) || !isPositive(evidence))
     return "invalid";
   if (!source.upstreamFamilies.includes(evidence.upstreamFamily))
     return "invalid";
@@ -136,6 +140,7 @@ function evidenceEligibility(
     if (expiry === null) return "invalid";
     if (expiry <= now) return "stale";
   }
+  if (evidence.stale || !sourceUsable(source, ip.family, now)) return "stale";
   if (
     isThreat(evidence) &&
     evidence.observedAt !== undefined &&
@@ -240,7 +245,7 @@ export function assessPurity(
     : conflict ? "network_conflict"
     : network.type === "unknown" ? "network"
     : !fullScoreSupported ? "threat_coverage" : undefined;
-  const score = scoreWithLimit(risk, limit);
+  const score = scoreWithLimit(risk, limit, assessment.historicalRiskPoints);
   return {
     modelVersion: PURITY_MODEL_VERSION,
     coverage,
@@ -262,6 +267,35 @@ function orderedThreats(threats: WeightedThreat[]): WeightedThreat[] {
   return [...threats].sort(
     (a, b) => b.weight - a.weight || a.evidence.id.localeCompare(b.evidence.id),
   );
+}
+
+/** Use the strongest exact historical hit that does not duplicate current activity. */
+function historicalThreat(
+  evidence: Evidence[],
+  eligibility: Map<string, Eligibility>,
+  sourceById: Map<string, SourceStatus>,
+  threats: WeightedThreat[],
+  address: ParsedIp,
+  now: number,
+) {
+  const exactRange = `${address.canonical}/${address.family === 4 ? 32 : 128}`;
+  const candidates: WeightedThreat[] = [];
+  for (const item of evidence) {
+    if (eligibility.get(item.id) !== "stale" || !isThreat(item) || item.matchedRange !== exactRange) continue;
+    const source = sourceById.get(item.sourceId)!;
+    if (source.matched !== true || source.count <= 0 || !source.categories.includes(item.category)) continue;
+    if (threats.some(({ evidence: current }) => current.category === item.category ||
+      (item.eventId && current.eventId === item.eventId) ||
+      sourceById.get(current.sourceId)!.upstreamFamilies.some(family => source.upstreamFamilies.includes(family)))) continue;
+    const anchor = timestamp(item.observedAt ?? item.publishedAt ?? source.publishedAt);
+    if (anchor === null) continue;
+    const age = (now - anchor) / DAY;
+    const decay = age <= 30 ? 0.25 : age <= 90 ? 0.15 : age <= 365 ? 0.08 : 0.04;
+    const freshness = decay * (item.observedAt ? 1 : 0.5);
+    const quality = Math.min(QUALITY[item.confidence], QUALITY[source.confidence]);
+    candidates.push({ evidence: item, freshness, quality, weight: THREAT_WEIGHTS[item.category]! * quality * freshness });
+  }
+  return orderedThreats(candidates)[0];
 }
 
 function chooseThreats(
@@ -485,8 +519,8 @@ function coverageGap(
     return {
       state: "stale", reason: "source_stale",
       description: text(
-        "相关来源已过期，且没有有效来源完成此项检查。过期数据不用于当前判断或评分。",
-        "Relevant sources are stale and no valid source completed this check. Expired data is excluded from current conclusions and scoring.",
+        "相关来源已过期，本次缺少有效来源检查。只有通过校验的历史 IP 风险命中可以少量扣分。",
+        "Relevant sources have expired, leaving no current check. Verified historical IP threat matches can make a small deduction.",
       ),
     };
   if (coverage.unavailableSourceIds.length)
@@ -580,10 +614,9 @@ function makeIndicators(
             "Applicable public intelligence records were found; expand for provenance, dates and limitations.",
           )
         : old.length
-          ? text(
-              "仅有过期记录，未参与当前评分。",
-              "Only expired records are available; they are excluded from scoring.",
-            )
+          ? definition.categories?.some(category => THREAT_WEIGHTS[category] !== undefined)
+            ? text("仅发现历史风险记录。展开查看时效，实际扣分见评分明细。", "Only historical risk records were found. Expand for dates and see scoring details for applied points.")
+            : text("仅有过期记录，未参与此项判断。", "Only expired records were found for this indicator.")
           : rejected.length
             ? text("匹配记录未通过范围、时效或来源校验，不能据此确认命中，也不能记作未命中。", "A record failed range, time or provenance validation. Neither a valid hit nor a non-match can be established from it.")
           : checked
@@ -669,8 +702,8 @@ export function assessRisk(input: ScoringInput): RiskAssessment {
       evidenceIds: [],
       label: text("零分起点", "Zero starting point"),
       explanation: text(
-        "只累加真实有效证据。检查完成后的 0 分表示当前覆盖未观察到有效风险信号，不是安全保证；资料不足时不输出分数。",
-        "Only valid evidence adds points. A checked zero means no eligible signal was observed within available coverage, not guaranteed safety. Insufficient data receives no score.",
+        "仅累加通过校验的风险证据。有效和历史命中各按时效计分。",
+        "Only verified risk evidence adds points. Current and historical matches use separate freshness weights.",
       ),
     },
   ];
@@ -757,16 +790,30 @@ export function assessRisk(input: ScoringInput): RiskAssessment {
     });
   }
 
-  // Version 2 only adds signals. Legacy negativeCoverageEligible metadata has
-  // no effect: absence from a list and residential access never subtract points.
-  const score = Math.round(
+  const currentScore = Math.round(
     details.reduce((sum, detail) => sum + detail.amount, 0),
   );
+  const historical = historicalThreat(input.evidence, eligibility, sourceById, threats, address, now);
+  const historicalRiskPoints = historical ? Math.min(15, 100 - currentScore, Math.max(1, Math.round(historical.weight))) : 0;
+  if (historical && historicalRiskPoints > 0) {
+    const name = THREAT_NAMES[historical.evidence.category]!;
+    details.push({
+      ruleId: "threat-historical",
+      label: text(`历史${name.zh}记录（已过期）`, `Historical ${name.en.toLowerCase()} record (expired)`),
+      amount: historicalRiskPoints,
+      evidenceIds: [historical.evidence.id],
+      explanation: text(
+        `按类别、来源质量和历史权重 ${historical.freshness} 取整。历史最多计 15 分。${historical.evidence.observedAt ? "已按记录的活动日期衰减。" : "活动日期未知，按快照日期降低权重。"}`,
+        `Rounded from category weight, source quality and historical weight ${historical.freshness}, capped at 15 points. ${historical.evidence.observedAt ? "Uses the recorded activity date." : "The activity date is unknown. The snapshot date limits its weight."}`,
+      ),
+    });
+  }
+  const score = currentScore + historicalRiskPoints;
   const hasThreatEvidence = threats.length > 0;
   const completedRiskChecks = applicable.filter(source => source.matched !== undefined && source.count > 0 && source.categories.some(category =>
     THREAT_WEIGHTS[category as SignalCategory] !== undefined || ["network", "vpn", "tor", "proxy", "public_proxy", "web_proxy", "residential_proxy"].includes(category)
   ) && (source.matched === false || valid.some(e => e.sourceId === source.id)) && !input.evidence.some(e => e.sourceId === source.id && eligibility.get(e.id) !== "valid" && isPositive(e)));
-  const assessable = hasThreatEvidence || context > 0 || completedRiskChecks.length > 0;
+  const assessable = hasThreatEvidence || historicalRiskPoints > 0 || context > 0 || completedRiskChecks.length > 0;
   const indicators = makeIndicators(input, valid, eligibility, address.family, now);
   const hasConflict =
     network.conflict || indicators.some((indicator) => indicator.state === "conflict") ||
@@ -805,6 +852,8 @@ export function assessRisk(input: ScoringInput): RiskAssessment {
         "该地址命中公开威胁情报。参考指数由具体类别、来源质量与活动时效生成；记录不代表当前使用者正在从事恶意行为，也不是欺诈概率。",
         "This address appears in public threat intelligence. The reference index uses recorded categories, source quality and event freshness; it does not establish current-user misconduct or a fraud probability.",
       )
+    : historicalRiskPoints > 0
+      ? text(`有已过期的公开风险记录，按历史权重计 ${historicalRiskPoints} 分。`, `Expired public risk evidence contributes ${historicalRiskPoints} historical point(s).`)
     : assessable
       ? text(
           `${networkSummary ? `公开来源将该地址归入${networkSummary.zh}。` : "已完成部分公开风险来源检查。"}${context ? `网络属性增加 ${context} 分。` : ""}当前没有可参与评分的该 IP 恶意活动命中；这不代表安全。住宅、公共代理等子类型需各自的情报依据，不能互相替代。`,
@@ -823,12 +872,15 @@ export function assessRisk(input: ScoringInput): RiskAssessment {
     networkType: network.type,
     attributes: [...new Set(input.attributes)].sort(),
     hasThreatEvidence,
+    historicalRiskPoints,
     scoreDetails: (assessable ? details : []).map((detail) => ({
       ...detail,
       amount: Math.round(detail.amount * 100) / 100,
     })),
     indicators,
-    evidence: [...input.evidence].sort((a, b) => a.id.localeCompare(b.id)),
+    evidence: input.evidence.map(evidence => ({
+      ...evidence, evaluation: eligibility.get(evidence.id), stale: eligibility.get(evidence.id) === "stale",
+    })).sort((a, b) => a.id.localeCompare(b.id)),
     sources: [...input.sources].sort((a, b) => a.id.localeCompare(b.id)),
     summary,
     datasetVersion: input.datasetVersion,

@@ -35,7 +35,7 @@ function resultPurity(report: IpReport): PurityAssessment & { score: number } {
     modelVersion: PURITY_MODEL_VERSION,
     coverage: "none",
     limit,
-    ...scoreWithLimit(assessment.riskScore, limit),
+    ...scoreWithLimit(assessment.riskScore, limit, assessment.historicalRiskPoints),
     status: "insufficient",
     checked: purity?.checked ?? 0,
     independentSources: purity?.independentSources ?? 0,
@@ -118,7 +118,10 @@ export function reportView(
     if (limit && reserved > 0) scoreDeductions.push(t(`${limitLabels[limit].zh}，预留 ${reserved} 分`, `${limitLabels[limit].en}. ${reserved} points held back`));
   }
   const threatIds = assessment.indicators.find(indicator => indicator.id === "threat")?.evidenceIds ?? [];
-  const historicalThreat = assessment.evidence.some(evidence => evidence.stale && threatIds.includes(evidence.id));
+  const threatRecords = assessment.evidence.filter(evidence => threatIds.includes(evidence.id));
+  const expiredThreats = threatRecords.filter(evidence => evidence.evaluation === "stale" || evidence.stale).length;
+  const validThreats = threatRecords.filter(evidence => evidence.evaluation === "valid" ||
+    (evidence.evaluation === undefined && assessment.hasThreatEvidence && !evidence.stale)).length;
   const rows = [
     { label: t("网络属性", "Network"), value: classification + (purity.status === "conflict" ? t(" · 来源存在分歧", " · sources disagree") : ""), tone: proxy || hosting || hostingHint || purity.status === "conflict" ? "caution" : "default" },
     ...(self ? [{
@@ -127,12 +130,11 @@ export function reportView(
       tone: dns?.verdict === "unexpected" ? "caution" : "default",
     }] : []),
     { label: t("公开风险记录", "Public risk records"),
-      value: assessment.hasThreatEvidence
-        ? t("发现公开威胁记录，可展开查看类别、来源与时效。", "Public threat records found. Expand evidence for categories, sources and dates.")
-        : historicalThreat ? t("有历史风险记录，来源或记录已过期。", "Historical risk records exist. The source or record has expired.")
+      value: validThreats || expiredThreats
+        ? t(`有效 ${validThreats} 条 · 已过期 ${expiredThreats} 条`, `${validThreats} valid · ${expiredThreats} expired`)
         : checked ? t(`本次核查 ${checked} 个适用来源，未发现有效威胁记录。`, `Checked ${checked} applicable source(s) without a valid threat hit.`)
         : t("暂无有效的地址级威胁检查。", "No valid IP-level threat checks."),
-      tone: assessment.hasThreatEvidence || historicalThreat ? "caution" : "default" },
+      tone: validThreats || expiredThreats ? "caution" : "default" },
   ];
   return {
     title: t("检测报告", "Detection report"),

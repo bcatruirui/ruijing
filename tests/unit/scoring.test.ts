@@ -463,24 +463,55 @@ describe("time, applicability and source failure", () => {
     }
   });
 
-  it("excludes expired events while preserving a stale indicator", () => {
+  it("uses a smaller deduction for an expired exact-IP match and keeps it labeled stale", () => {
     const result = assessRisk(withThreat({ observedAt: dateAgo(91) }));
     expect(result).toMatchObject({
-      riskScore: null,
-      scoreKind: "insufficient",
+      riskScore: 7,
+      historicalRiskPoints: 7,
+      scoreKind: "evidence",
       hasThreatEvidence: false,
     });
+    expect(result.evidence[0]).toMatchObject({ stale: true, evaluation: "stale" });
     expect(result.indicators.find((item) => item.id === "threat")?.state).toBe(
       "stale",
     );
+    const expiredSource = assessRisk(withThreat({ observedAt: undefined }, {
+      state: "stale", publishedAt: dateAgo(15), expiresAt: dateAgo(7),
+    }));
+    expect(expiredSource).toMatchObject({ historicalRiskPoints: 11, hasThreatEvidence: false });
+    expect(assessPurity(expiredSource, 4)).toMatchObject({ score: 39, reservedPoints: 50, checked: 0 });
+  });
+
+  it("deduplicates an expired hit against an effective hit and rejects historical range-only evidence", () => {
+    const checked = assessRisk(input({
+      evidence: [evidence("current"), evidence("historical", {
+        sourceId: "b", upstreamFamily: "b", observedAt: dateAgo(91),
+      })],
+      sources: [source("synthetic-a", { matched: true }), source("b", { matched: true })],
+    }));
+    expect(checked).toMatchObject({ historicalRiskPoints: 0, riskScore: 90, hasThreatEvidence: true });
+    expect(checked.evidence.map(item => item.evaluation)).toEqual(["valid", "stale"]);
+    expect(assessRisk(withThreat({ observedAt: dateAgo(91), matchedRange: "8.8.8.0/24" })).historicalRiskPoints).toBe(0);
+    expect(assessRisk(withThreat({ stale: true, matchedRange: "1.1.1.1/32" })).evidence[0].evaluation).toBe("invalid");
+  });
+
+  it("retains an independent historical deduction alongside current risk without double-counting the same upstream", () => {
+    const history = evidence("past", { category: "malware", sourceId: "b", upstreamFamily: "b", observedAt: dateAgo(104) });
+    const sources = [source("synthetic-a", { matched: true }), source("b", { matched: true })];
+    const mixed = assessRisk(input({ sources, evidence: [evidence("active"), history] }));
+    expect(mixed).toMatchObject({ riskScore: 97, historicalRiskPoints: 7, hasThreatEvidence: true });
+    expect(mixed.scoreDetails.find(detail => detail.ruleId === "threat-historical")?.evidenceIds).toEqual(["past"]);
+    const linked = assessRisk(input({
+      sources: [sources[0], { ...sources[1], upstreamFamilies: ["b", "synthetic-a"] }],
+      evidence: [evidence("active"), history],
+    }));
+    expect(linked.historicalRiskPoints).toBe(0);
   });
 
   it.each([
     { state: "unavailable" as const },
     { state: "unconfigured" as const },
-    { state: "stale" as const },
     { families: [6] as [6] },
-    { expiresAt: dateAgo(1) },
     { expiresAt: "bad" },
     { publishedAt: "bad" },
     { fetchedAt: dateAgo(-1) },
@@ -498,9 +529,7 @@ describe("time, applicability and source failure", () => {
     { observedAt: dateAgo(-1) },
     { publishedAt: "bad" },
     { fetchedAt: dateAgo(-1) },
-    { expiresAt: dateAgo(0) },
     { expiresAt: "bad" },
-    { stale: true },
     { upstreamFamily: "unrelated" },
     { sourceId: "missing" },
     { matchedRange: "1.1.1.0/24" },

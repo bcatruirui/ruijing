@@ -13,7 +13,7 @@ test("real offline hosting report shows additive evidence, local flag and source
   const report = await (await pending).json();
   expect(report.info).toMatchObject({asn: 14315, networkType: "hosting", countryCode: "US", latitude: 33.4484, longitude: -112.074});
   expect(report.info.postalCode).toBeUndefined();
-  expect(report.assessment).toMatchObject({riskScore: 25, riskLevel: "low", hasThreatEvidence: false, modelVersion: "ruijing-evidence-2.2.0"});
+  expect(report.assessment).toMatchObject({riskScore: 25, riskLevel: "low", hasThreatEvidence: false, modelVersion: "ruijing-evidence-2.3.0"});
   expect(report.assessment.scoreDetails).toEqual(expect.arrayContaining([expect.objectContaining({ruleId: "network-context-hosting", amount: 25})]));
   const purity = page.getByRole("region", { name: "IP 纯净值" });
   await expect(purity.locator(".purity-number strong")).toHaveText(report.purity.score === null ? "—" : String(100 - report.assessment.riskScore));

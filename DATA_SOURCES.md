@@ -49,7 +49,7 @@ FireHOL/IPsum 是聚合器，各上游许可及血缘不能自动继承；IP2Pro
 
 OpenASN 使用仓库指定的 **`releases/download/latest/<file>`** tag-address URL，不使用含义不同的 `releases/latest/download/<file>`。下载到的 manifest 明确声明 build_id 为 `2026-10-21T08:35:31Z`；虽然上游描述为 nightly rolling，本项目没有证据证明 10 月 21 日之后每夜都成功更新，不能将 10 月 28 日下载称为 10 月 28 日发布。该网络分类快照按项目 30 天窗口到期。
 
-FFraud 的发布元数据、CSV 和许可固定在同一提交，按发布日计算有效期。CSV 缺少单条活动日期，命中时按缺活动日期的规则计算。重新下载不会重置有效期。Feodo 也保留 `Last-Modified` 和 `last_online`，过期的记录排除在评分之外。
+FFraud 的发布元数据、CSV 和许可固定在同一提交，按发布日计算有效期。CSV 缺少单条活动日期，命中时按缺活动日期的规则计算。重新下载不会重置有效期。Feodo 也保留 `Last-Modified` 和 `last_online`。通过校验的过期地址级风险命中按[历史权重](RISK_SCORING.md)计分。
 
 Tor 与 Feodo 本次实际快照只有 IPv4 分片，IPv6 不视为已检测未命中。FFraud、OpenASN 和 DB-IP 本次有实际 IPv4/IPv6 数据。
 
