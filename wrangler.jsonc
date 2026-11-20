@@ -11,7 +11,6 @@
     "not_found_handling": "none",
     "run_worker_first": [
       "/*",
-      "!/",
       "!/index.html",
       "!/assets/*",
       "!/favicon.svg",
@@ -26,5 +25,19 @@
     "ALLOWED_APP_ORIGINS": "[]",
     "DNS_PUBLIC_VERIFIED": "false",
     "USE_BUNDLED_SNAPSHOT": "true",
+  },
+  "env": {
+    "preview": {
+      "name": "ruijing-ip-preview",
+      "routes": [{ "pattern": "ip-preview.ruirui.uk", "custom_domain": true }],
+      "vars": {
+        "ROUTING_NODES": "[]",
+        "FAMILY_ENDPOINTS": "{}",
+        "ALLOWED_ECHO_ORIGINS": "[]",
+        "ALLOWED_APP_ORIGINS": "[]",
+        "DNS_PUBLIC_VERIFIED": "false",
+        "USE_BUNDLED_SNAPSHOT": "true",
+      },
+    },
   },
 }

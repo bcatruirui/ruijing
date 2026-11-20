@@ -38,4 +38,6 @@ flowchart LR
 
 ## 部署与验证边界
 
+`npm run build` 生成带服务端情报分片的 Worker 产物。用 `node scripts/project-command.mjs worker deploy --env preview` 发布 `ip-preview.ruirui.uk`。预览的前端和 `/api/*` 同域，页面禁止索引，正式发布继续由 GitHub Pages 与生产 Worker 提供。
+
 数据构建、应用生产构建和 Wrangler dry-run 都是本地验证；正式 `deploy` 是单独的审批后操作。没有真实上线和资源压测证据时，不宣称全球可用、生产 CPU 满足 10 ms、公网 DNS 委派成功或 STUN 已联通。

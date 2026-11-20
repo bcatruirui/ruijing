@@ -166,36 +166,57 @@ describe("public purity evidence gate", () => {
   }));
   const threatSource = (id: string, patch: Partial<SourceStatus> = {}) => source(id, { categories: ["c2"], ...patch });
 
-  it("withholds an inverted zero-risk score without independent coverage", () => {
+  it("reserves points without independent coverage", () => {
     const one = classified("residential", [threatSource("b")]);
     expect(one.riskScore).toBe(0);
-    expect(assessPurity(one, 4)).toMatchObject({ score: null, checked: 1, coverage: "limited" });
+    expect(assessPurity(one, 4)).toMatchObject({ score: 85, reservedPoints: 15, checked: 1, coverage: "limited" });
     const correlated = classified("residential", [threatSource("b"), threatSource("c", { upstreamFamilies: ["b"] })]);
-    expect(assessPurity(correlated, 4)).toMatchObject({ score: null, independentSources: 1 });
+    expect(assessPurity(correlated, 4)).toMatchObject({ score: 85, independentSources: 1 });
     expect(assessPurity(classified("residential", [threatSource("b"), threatSource("c")]), 4)).toMatchObject({ score: 100, coverage: "sufficient" });
   });
 
-  it("gives confirmed residential access full marks after two independent clear checks even with narrow coverage", () => {
+  it("withholds full marks when the two independent checks only provide narrow coverage", () => {
     const clear = [threatSource("b", { limitedCoverage: true }), threatSource("c", { limitedCoverage: true })];
     const residential = classified("residential", clear);
-    expect(assessPurity(residential, 4)).toMatchObject({ score: 100, coverage: "limited", checked: 2, independentSources: 2 });
-    expect(assessPurity(residential, 4, true)).toMatchObject({ score: null, status: "conflict" });
-    expect(assessPurity(classified("business", clear), 4).score).toBeNull();
+    expect(assessPurity(residential, 4)).toMatchObject({ score: 85, coverage: "limited", checked: 2, independentSources: 2, limit: "threat_coverage" });
+    expect(assessPurity(residential, 4, true)).toMatchObject({ score: 75, reservedPoints: 25, status: "conflict" });
+    expect(assessPurity(classified("business", clear), 4).score).toBe(85);
   });
 
-  it("requires two completed no-match checks for the residential exception", () => {
-    const first = threatSource("b", { limitedCoverage: true });
+  it("requires two completed broadly covered checks without a match for full marks", () => {
+    const first = threatSource("b");
     for (const patch of [{ matched: true }, { matched: undefined }, { state: "stale" as const }, { families: [6 as const] }]) {
-      const residential = classified("residential", [first, threatSource("c", { limitedCoverage: true, ...patch })]);
-      expect(assessPurity(residential, 4).score).toBeNull();
+      const residential = classified("residential", [first, threatSource("c", patch)]);
+      expect(assessPurity(residential, 4).score).toBe(85);
     }
   });
 
-  it("allows a covered nonzero score and withholds stale, unsupported and conflicting results", () => {
+  it("keeps weak residential hints out of classification and lets verified prefixes override ASN labels", () => {
+    const sources = [source("synthetic-a", { categories: ["network"], matched: true }), threatSource("b"), threatSource("c")];
+    const residential = evidence("home", { category: "network", networkType: "residential", confidence: "low" });
+    const weak = assessRisk(input({ networkType: "residential", evidence: [residential], sources }));
+    expect(weak.networkType).toBe("unknown");
+    expect(assessPurity(weak, 4)).toMatchObject({ score: 75, coverage: "sufficient", limit: "network" });
+
+    const prefix = evidence("cloud", {
+      sourceId: "cloud", upstreamFamily: "cloud", category: "network", networkType: "cloud",
+      networkBasis: "prefix", matchedRange: "8.8.8.0/24",
+    });
+    const verified = assessRisk(input({
+      evidence: [{ ...residential, confidence: "medium" }, prefix],
+      sources: [...sources, source("cloud", { categories: ["network"], matched: true })],
+    }));
+    expect(verified.networkType).toBe("cloud");
+    expect(assessPurity(verified, 4)).toMatchObject({ score: 80, status: "scored" });
+  });
+
+  it("retains verified deductions when evidence is incomplete or conflicting", () => {
     expect(assessPurity(classified("hosting", [threatSource("b", { limitedCoverage: true }), threatSource("c", { limitedCoverage: true })]), 4)).toMatchObject({ score: 75, coverage: "limited", checked: 2, independentSources: 2 });
-    expect(assessPurity(classified("hosting", [threatSource("b", { expiresAt: AS_OF })]), 4)).toMatchObject({ score: null, coverage: "none" });
-    expect(assessPurity(classified("hosting", [threatSource("b", { families: [6] })]), 4).score).toBeNull();
-    expect(assessPurity(classified("hosting", [threatSource("b")]), 4, true)).toMatchObject({ score: null, status: "conflict" });
+    expect(assessPurity(classified("hosting", [threatSource("b", { expiresAt: AS_OF })]), 4)).toMatchObject({ score: 50, reservedPoints: 25, coverage: "none" });
+    expect(assessPurity(classified("hosting", [threatSource("b", { families: [6] })]), 4).score).toBe(50);
+    expect(assessPurity(classified("hosting", [threatSource("b")]), 4, true)).toMatchObject({ score: 75, reservedPoints: 0, status: "conflict" });
+    expect(assessPurity(assessRisk(withThreat()), 4)).toMatchObject({ score: 10, reservedPoints: 0 });
+    expect(assessPurity(assessRisk(input()), 4)).toMatchObject({ score: 50, reservedPoints: 50 });
   });
 });
 

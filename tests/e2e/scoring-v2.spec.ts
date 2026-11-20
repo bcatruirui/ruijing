@@ -13,7 +13,7 @@ test("real offline hosting report shows additive evidence, local flag and source
   const report = await (await pending).json();
   expect(report.info).toMatchObject({asn: 14315, networkType: "hosting", countryCode: "US", latitude: 33.4484, longitude: -112.074});
   expect(report.info.postalCode).toBeUndefined();
-  expect(report.assessment).toMatchObject({riskScore: 25, riskLevel: "low", hasThreatEvidence: false, modelVersion: "ruijing-evidence-2.1.0"});
+  expect(report.assessment).toMatchObject({riskScore: 25, riskLevel: "low", hasThreatEvidence: false, modelVersion: "ruijing-evidence-2.2.0"});
   expect(report.assessment.scoreDetails).toEqual(expect.arrayContaining([expect.objectContaining({ruleId: "network-context-hosting", amount: 25})]));
   const purity = page.getByRole("region", { name: "IP 纯净值" });
   await expect(purity.locator(".purity-number strong")).toHaveText(report.purity.score === null ? "—" : String(100 - report.assessment.riskScore));
@@ -49,7 +49,7 @@ test("real offline hosting report shows additive evidence, local flag and source
   }
 });
 
-test("Mock missing coverage is unscored in the gauge and exported JSON", async ({page}) => {
+test("Mock missing coverage shows a provisional score in the gauge and exported JSON", async ({page}) => {
   await page.route("**/api/lookup", async route => {
     const report = await (await route.fetch()).json();
     Object.assign(report.assessment, {
@@ -64,8 +64,9 @@ test("Mock missing coverage is unscored in the gauge and exported JSON", async (
   await page.getByRole("textbox", {name: "查询公网 IP"}).fill("104.251.123.25");
   await page.getByRole("button", {name: "查询 IP", exact: true}).click();
   const purity = page.getByRole("region", { name: "IP 纯净值" });
-  await expect(purity.locator(".purity-number strong")).toHaveText("—");
-  await expect(purity).toContainText("资料不足");
+  await expect(purity.locator(".purity-number strong")).toHaveText("50");
+  await expect(purity).toContainText("证据待补充");
+  await expect(purity).toContainText("缺少有效风险检查，预留 50 分");
   expect(await purity.getAttribute("data-risk")).toBeNull();
   const download = page.waitForEvent("download");
   await page.getByRole("button", {name: "JSON", exact: true}).click();
@@ -73,7 +74,8 @@ test("Mock missing coverage is unscored in the gauge and exported JSON", async (
   const {readFile} = await import("node:fs/promises");
   const exported = JSON.parse(await readFile(file!, "utf8"));
   expect(exported.assessment.riskScore).toBeNull();
-  expect(exported.purity.score).toBeNull();
+  expect(exported.purity.score).toBe(50);
+  expect(exported.summary.score).toBe(50);
   await page.getByRole("button", { name: "隐藏 IP", exact: true }).click();
   const redactedDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "JSON", exact: true }).click();

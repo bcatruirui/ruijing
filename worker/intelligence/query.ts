@@ -173,7 +173,7 @@ export async function queryIntelligence(
     ipHex = parsed.value.toString(16).padStart(family === 4 ? 8 : 32, "0");
   const statuses = sourceStatuses(manifest, now),
     evidence: Evidence[] = [];
-  const budget = { remaining: 9 }; // One manifest read + at most nine shard reads, with bounded concurrency.
+  const budget = { remaining: 12 }; // Bound shard reads separately from the Workers subrequest quota.
   const info: IpInfo = {
     ip: parsed.canonical,
     family,
@@ -196,8 +196,7 @@ export async function queryIntelligence(
     if (
       !["ready", "stale"].includes(status.state) ||
       !source.families.includes(family) ||
-      replacedAttribution ||
-      (source.id === "ipverse-network" && info.networkType !== "unknown")
+      replacedAttribution
     )
       continue;
     try {
@@ -232,12 +231,6 @@ export async function queryIntelligence(
             info.geoAccuracy = "approximate";
             info.geoUpdatedAt = source.publishedAt || source.fetchedAt;
           }
-          if (
-            p.networkType &&
-            p.networkType !== "unknown" &&
-            info.networkType === "unknown"
-          )
-            info.networkType = p.networkType;
           for (const a of p.attributes || [])
             if (!info.attributes.includes(a)) info.attributes.push(a);
           if (
@@ -281,6 +274,7 @@ export async function queryIntelligence(
           matchedRangeLabel: rangeLabel,
           eventId: p.eventId,
           networkType: p.networkType,
+          networkBasis: p.networkBasis,
           stale: status.state === "stale",
         };
         evidence.push(base);
@@ -291,6 +285,7 @@ export async function queryIntelligence(
             category: "asn",
             value: p.asn,
             networkType: undefined,
+            networkBasis: undefined,
             attribute: undefined,
           });
         if (p.attributes?.length) {

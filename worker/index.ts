@@ -118,16 +118,11 @@ export async function handleRequest(
     path = url.pathname;
   // No arbitrary asset fallback: encoded aliases and HTML navigation cannot expose intelligence.
   if (!path.startsWith("/api/")) {
-    if (
-      path === "/privacy" ||
-      path === "/methodology" ||
-      path === "/data-sources"
-    )
+    if (path === "/" || /^\/(privacy|methodology|data-sources)\/?$/.test(path))
       return env.ASSETS.fetch(
         new Request(new URL("/index.html", url), request),
       );
     if (
-      path === "/" ||
       path === "/index.html" ||
       path === "/favicon.svg" ||
       path === "/robots.txt" ||
@@ -353,6 +348,16 @@ async function handleApi(request: Request, env: Env, path: string, crossOrigin: 
     const now = new Date(),
       manifest = await loadManifest(env),
       found = await queryIntelligence(env, manifest, parsed.canonical, now);
+    const assessment = assessRisk({
+      ip: parsed.canonical,
+      evidence: found.evidence,
+      sources: found.sources,
+      networkType: found.info.networkType,
+      attributes: found.info.attributes,
+      asOf: now.toISOString(),
+      datasetVersion: manifest.version,
+    });
+    found.info.networkType = assessment.networkType;
     const { ip: _ip, family: _family, attributes: _attributes, ...offline } = found.info;
     const conflicts: NonNullable<IpReport["provenance"]>["conflicts"] = [];
     if (path === "/api/self" && cf) {
@@ -393,15 +398,6 @@ async function handleApi(request: Request, env: Env, path: string, crossOrigin: 
       }
       found.info.connectionProtocol = s("httpProtocol");
     }
-    const assessment = assessRisk({
-      ip: parsed.canonical,
-      evidence: found.evidence,
-      sources: found.sources,
-      networkType: found.info.networkType,
-      attributes: found.info.attributes,
-      asOf: now.toISOString(),
-      datasetVersion: manifest.version,
-    });
     if (conflicts.length && assessment.confidence !== "insufficient") assessment.confidence = "low";
     const report: IpReport = {
       info: found.info,

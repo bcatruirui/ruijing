@@ -6,6 +6,7 @@ import { parseIp } from "../shared/ip.ts";
 import { registerProxySources } from "./proxy-sources.mjs";
 import { ffraudRelease, registerAsnReputation } from "./asn-reputation.mjs";
 import { registerAttributionFallbacks } from "./attribution-sources.mjs";
+import { cloudRangeIds, registerCloudRanges } from "./cloud-ranges.mjs";
 import { registerDshield } from "./dshield-source.mjs";
 import {
   ROOT,
@@ -60,7 +61,7 @@ const only = onlyArg ? new Set(onlyArg.split(",")) : undefined;
 const loaded = await readFile(path.join(GENERATED, "manifest.json"), "utf8")
   .then(JSON.parse).catch(error => { if (error.code !== "ENOENT") throw error; });
 const previousManifest = loaded?.profile === profile ? loaded : undefined;
-if (only && (!previousManifest || [...only].some(id => !["iptoasn-v4", "iptoasn-v6", "openasn", "dbip-city", "tor", "ffraud", "feodo", "monosans-proxies", "ffraud-asn", "carpathian", "dbip-asn", "ipverse-network", "dshield"].includes(id)))) throw new Error("Partial refresh requires matching profile and recognized sources");
+if (only && (!previousManifest || [...only].some(id => !["iptoasn-v4", "iptoasn-v6", "openasn", "dbip-city", "tor", "ffraud", "feodo", "monosans-proxies", "ffraud-asn", "carpathian", "dbip-asn", "ipverse-network", "dshield", ...cloudRangeIds].includes(id)))) throw new Error("Partial refresh requires matching profile and recognized sources");
 if (only && ["iptoasn-v4", "iptoasn-v6", "ffraud"].some(id => only.has(id))) only.add("ffraud-asn");
 if (only?.has("dbip-asn")) only.add("ipverse-network");
 
@@ -301,6 +302,7 @@ for (const family of [4, 6]) {
 }
 
 await registerAttributionFallbacks({ run, base, meta, sources, reuse });
+if (withCity) await registerCloudRanges({ run, base, meta, reuse, compareRecords });
 
 await run(
   base(
@@ -404,12 +406,7 @@ await run(
       const row = Object.fromEntries(headers.map((h, i) => [h, fields[i]]));
       const reasons = row.core_sources.split("|");
       // X4B's DC overlay also covers VPN/non-eyeball space; alone it is not a confirmed hosting verdict.
-      const networkType =
-        row.core_verdict === "hosting" &&
-        reasons.length === 1 &&
-        reasons[0] === "x4b_dc"
-          ? "unknown"
-          : (verdicts[row.core_verdict] ?? "unknown");
+      const networkType = verdicts[row.core_verdict] ?? "unknown";
       await writer.add(
         interval(row.start_ip, row.end_ip, {
           kind: "network",

@@ -52,7 +52,22 @@ describe("detection report boundaries", () => {
       { ruleId: "network-context-hosting", amount: 20, label: { zh: "机房", en: "Hosting" }, explanation: { zh: "归属信号", en: "Network attribution" }, evidenceIds: [] },
       { ruleId: "threat-phishing", amount: 41.5, label: { zh: "钓鱼", en: "Phishing" }, explanation: { zh: "公开情报", en: "Public intelligence" }, evidenceIds: [] },
     ];
-    expect(reportView(report, "zh").scoreDeductions).toEqual(["机房托管扣 20 分", "钓鱼扣 41.5 分", "合计扣 62 分（取整）"]);
+    expect(reportView(report, "zh").scoreDeductions).toEqual(["机房托管扣 20 分", "钓鱼扣 41.5 分", "证据扣分合计 62 分（取整）"]);
+  });
+  it("shows a weak hosting clue separately from confirmed deductions", () => {
+    const report = fixture("lookup", "unknown", "US");
+    report.purity = { modelVersion: "ruijing-purity-6", score: 75, status: "insufficient", checked: 1, independentSources: 1, coverage: "limited", limit: "network", reservedPoints: 25 };
+    report.assessment.evidence.push({
+      id: "weak-hosting", sourceId: "openasn", sourceName: "OpenASN", upstreamFamily: "openasn-core",
+      sourceUrl: "https://github.com/openasn/openasn", category: "network", value: "hosting",
+      confidence: "low", networkType: "hosting", description: { zh: "测试线索", en: "Test clue" },
+    });
+    expect(reportView(report, "zh")).toMatchObject({
+      score: 75, riskTier: null, network: "疑似机房 · OpenASN 提供低置信线索",
+      scoreDeductions: ["网络用途待核实，预留 25 分"],
+    });
+    report.assessment.evidence[0].stale = true;
+    expect(reportView(report, "zh").network).toBe("类型未知");
   });
   it("keeps browser signals out of a manual lookup", () => {
     const view = reportView(fixture("lookup", "hosting", "JP"), "zh", { timezone: "Asia/Shanghai", dnsReady: true, hidden: true });
@@ -63,7 +78,7 @@ describe("detection report boundaries", () => {
 
   it("requires a uniquely supported device environment", () => {
     const self = fixture("self", "hosting", "JP");
-    expect(reportView(self, "zh", { timezone: "Asia/Shanghai" }).judgment).toContain("不足");
+    expect(reportView(self, "zh", { timezone: "Asia/Shanghai" }).judgment).toBe("");
     expect(reportView(self, "zh", { timezone: "Asia/Shanghai", alternate: fixture("lookup", "mobile", "CN", "1.1.1.1") }).judgment).toContain("可能关联中国");
     expect(timezoneCountries("UTC")).toEqual([]);
     expect(timezoneCountries("Asia/Calcutta")).toContain("IN");

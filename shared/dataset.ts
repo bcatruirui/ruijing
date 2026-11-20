@@ -71,6 +71,7 @@ const allowedFields = new Set([
   "kind",
   "asn",
   "networkType",
+  "networkBasis",
   "attributes",
   "category",
   "confidence",
@@ -92,6 +93,9 @@ function validPayload(value: unknown, family: 4 | 6): value is IntelPayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const item = value as Record<string, unknown>;
   if (Object.keys(item).some((key) => !allowedFields.has(key))) return false;
+  if (item.networkBasis !== undefined &&
+    (item.networkBasis !== "prefix" || item.kind !== "network" || !item.networkType || typeof item.prefix !== "string"))
+    return false;
   if (typeof item.kind !== "string" || !kinds.has(item.kind)) return false;
   if (
     stringFields.some(

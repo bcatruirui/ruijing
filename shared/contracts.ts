@@ -78,6 +78,7 @@ export interface Evidence {
   eventId?: string;
   independentEvent?: boolean;
   networkType?: NetworkType;
+  networkBasis?: "prefix";
   attribute?: NetworkAttribute;
   stale?: boolean;
 }
@@ -143,9 +144,12 @@ interface PurityScoreFields {
   checked: number;
   independentSources: number;
 }
+export type PurityLimit = "no_threat_checks" | "network_conflict" | "network" | "threat_coverage";
 export type PurityAssessment = PurityScoreFields & (
   | { modelVersion: "ruijing-purity-1" }
   | { modelVersion: "ruijing-purity-2" | "ruijing-purity-3" | "ruijing-purity-4"; coverage: "none" | "limited" | "sufficient" }
+  | { modelVersion: "ruijing-purity-5"; coverage: "none" | "limited" | "sufficient"; reason?: "network" | "threat_coverage" }
+  | { modelVersion: "ruijing-purity-6"; score: number; coverage: "none" | "limited" | "sufficient"; limit?: PurityLimit; reservedPoints: number }
 );
 export interface IpInfo {
   ip: string;
@@ -199,6 +203,7 @@ export interface IntelPayload {
   postalCode?: string;
   timezone?: string;
   networkType?: NetworkType;
+  networkBasis?: "prefix";
   attributes?: NetworkAttribute[];
   category?: SignalCategory;
   observedAt?: string;

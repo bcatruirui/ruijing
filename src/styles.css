@@ -2549,6 +2549,8 @@ td strong {
 .purity-grade { justify-self: start; color: var(--risk-accent, #fff); font-size: 16px; }
 .purity-panel[data-risk] .purity-grade { display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px; border: 1px solid color-mix(in srgb, var(--risk-accent) 52%, transparent); border-radius: 999px; }
 .purity-panel[data-risk] .purity-grade::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.purity-panel[data-provisional] .purity-grade { color: #d1e5fb; font-weight: 650; }
+.purity-panel[data-provisional] .purity-track i { background: repeating-linear-gradient(135deg, #91b7e1 0 5px, #729ac8 5px 9px); }
 .purity-deductions { display: flex; flex-wrap: wrap; gap: 3px 18px; margin: 0; padding: 0; list-style: none; }
 .purity-deductions li { min-width: 0; overflow-wrap: anywhere; }
 .purity-track { margin-top: 8px; height: 5px; border-radius: 20px; background: #6f8eb550; overflow: hidden; }

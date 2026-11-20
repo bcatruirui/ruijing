@@ -562,7 +562,7 @@ export function App() {
               onClick={() => report && void copy(report.info.ip)}><Clipboard size={16} /></button>
           </div>
         </section>
-        <section className="panel purity-panel" data-risk={view?.riskTier ?? undefined} aria-label={t("IP 纯净值", "IP purity score")} aria-busy={loading}>
+        <section className="panel purity-panel" data-risk={view?.riskTier ?? undefined} data-provisional={view?.provisional || undefined} aria-label={t("IP 纯净值", "IP purity score")} aria-busy={loading}>
           <div className="purity-primary">
             <div className="eyebrow"><ShieldCheck size={17} />{t("IP 纯净值", "IP purity score")}</div>
             <div className="purity-number"><strong>{purity ?? "—"}</strong><span>/ 100</span></div>
@@ -606,8 +606,8 @@ export function App() {
             <Trash2 size={15} aria-hidden="true" />{t("清除本次检测", "Clear current checks")}
           </button>
         </div>
-        {report && <IpDiagnostics report={report} lang={lang} country={country}
-          network={networkNames[report.info.networkType]?.[lang] ?? networkNames.unknown[lang]} hidden={hidden} />}
+        {report && view && <IpDiagnostics report={report} lang={lang} country={country}
+          network={view.network} hidden={hidden} />}
         <section className="panel report-panel" id="evidence">
           <div className="panel-heading">
             <div>
@@ -808,7 +808,7 @@ export function App() {
               </span>
               <div>
                 <strong>
-                  {networkNames[report?.info.networkType || "unknown"]?.[lang]}
+                  {view?.network ?? networkNames.unknown[lang]}
                 </strong>
                 <span>
                   {report?.info.attributes.length
@@ -1154,8 +1154,8 @@ export function App() {
               <>
                 <p>
                   {t(
-                    "纯净值从 100 分扣除有效证据对应的分数。完成适用的网络分类及威胁检查后才评分。满分须有至少两项独立的适用来源支持。",
-                    "Purity starts at 100 and deducts points for eligible evidence. A score requires applicable network classification and threat checks. A full score requires support from at least two independent, applicable sources.",
+                    "每次完成检测都会给分。先扣除已确认的网络和风险信号，再按证据覆盖限制最高分。满分要求有效的网络分类，以及至少两个独立且覆盖足够的风险来源完成查验且无命中。",
+                    "Every completed check receives a score. Verified signals deduct points and available evidence determines the maximum. A full score requires a confirmed network type and no hits from two independent threat sources with sufficient coverage.",
                   )}
                 </p>
                 <ul className="purity-scale" aria-label={t("纯净值分档", "Purity score bands")}>

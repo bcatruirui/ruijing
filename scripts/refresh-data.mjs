@@ -2,8 +2,10 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { CACHE, GENERATED, ROOT } from "./data-utils.mjs";
+import { cloudRangeIds } from "./cloud-ranges.mjs";
 
 const cadence = {
+  ...Object.fromEntries(cloudRangeIds.map(id => [id, 24])),
   tor: 2, "monosans-proxies": 2, carpathian: 2,
   "iptoasn-v4": 24, "iptoasn-v6": 24, openasn: 24,
   "dbip-city": 24, "dbip-asn": 24, "ipverse-network": 24, ffraud: 24, feodo: 24, dshield: 24,

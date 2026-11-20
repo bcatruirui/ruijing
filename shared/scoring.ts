@@ -5,6 +5,7 @@ import type {
   LocalizedText,
   NetworkAttribute,
   PurityAssessment,
+  PurityLimit,
   RiskAssessment,
   ScoreAdjustment,
   ScoringInput,
@@ -12,10 +13,9 @@ import type {
   SourceStatus,
 } from "./contracts.ts";
 import { containsIp, requirePublicIp, type ParsedIp } from "./ip.ts";
-import { purityTier } from "./purity-scale.ts";
+import { PURITY_MODEL_VERSION, purityTier, scoreWithLimit } from "./purity-scale.ts";
 
-export const MODEL_VERSION = "ruijing-evidence-2.1.0";
-export const PURITY_MODEL_VERSION = "ruijing-purity-4";
+export const MODEL_VERSION = "ruijing-evidence-2.2.0";
 const DAY = 86_400_000;
 const text = (zh: string, en: string): LocalizedText => ({ zh, en });
 
@@ -191,6 +191,26 @@ function independentSources(sources: readonly SourceStatus[]): SourceStatus[] {
   return sourceComponents(sources).map((members) => members[0]);
 }
 
+/** Select network use based on eligible evidence, with explicit prefix assertions
+ * taking precedence over whole-AS classifications. Low-confidence labels stay in the evidence. */
+function classifyNetwork(evidence: Evidence[]) {
+  const candidates = evidence.filter(item => item.category === "network" &&
+    item.networkType && item.networkType !== "unknown" && item.confidence !== "low");
+  const prefixes = candidates.filter(item => item.networkBasis === "prefix" && item.matchedRange);
+  const specificity = (item: Evidence) => Number(item.matchedRange!.split("/")[1]);
+  const longest = Math.max(...prefixes.map(specificity));
+  const preferred = prefixes.length ? prefixes.filter(item => specificity(item) === longest) : candidates;
+  const types = new Set(preferred.map(item => item.networkType!));
+  const hosting = types.has("hosting") || types.has("cloud");
+  const conflict = types.size > (types.has("hosting") && types.has("cloud") ? 2 : 1);
+  return {
+    conflict,
+    type: conflict ? "unknown" as const
+      : hosting ? (types.has("hosting") ? "hosting" as const : "cloud" as const)
+        : types.values().next().value ?? "unknown" as const,
+  };
+}
+
 export function assessPurity(
   assessment: RiskAssessment,
   family: 4 | 6,
@@ -206,26 +226,27 @@ export function assessPurity(
       !source.positiveOnlyCategories?.includes(category)),
   );
   const independent = independentSources(checks).length;
-  const networkTypes = new Set(assessment.evidence.flatMap(evidence => {
-    if (evidence.category !== "network" || !evidence.networkType || evidence.networkType === "unknown") return [];
+  const network = classifyNetwork(assessment.evidence.filter(evidence => {
+    if (evidence.category !== "network") return false;
     const source = assessment.sources.find(source => source.id === evidence.sourceId && source.matched === true);
-    if (evidenceEligibility(evidence, source, address, now) !== "valid") return [];
-    return [evidence.networkType === "cloud" ? "hosting" : evidence.networkType];
+    return evidenceEligibility(evidence, source, address, now) === "valid";
   }));
-  const conflict = provenanceConflict || networkTypes.size > 1 || assessment.indicators.some(indicator => indicator.state === "conflict");
+  const conflict = provenanceConflict || network.conflict || assessment.indicators.some(indicator => indicator.state === "conflict");
   const risk = assessment.riskScore;
   const broadlyCovered = independentSources(checks.filter(source => !source.limitedCoverage)).length;
   const coverage = broadlyCovered >= 2 ? "sufficient" : independent > 0 ? "limited" : "none";
-  const residentialChecksClear = networkTypes.has("residential") && independent >= 2 &&
-    checks.every(source => source.matched === false);
-  const fullScoreSupported = coverage === "sufficient" || residentialChecksClear;
-  const score = !conflict && networkTypes.size === 1 && coverage !== "none" && risk !== null && (risk !== 0 || fullScoreSupported)
-    ? 100 - risk : null;
+  const fullScoreSupported = independentSources(checks.filter(source => !source.limitedCoverage && source.matched === false)).length >= 2;
+  const limit: PurityLimit | undefined = !independent && !assessment.hasThreatEvidence ? "no_threat_checks"
+    : conflict ? "network_conflict"
+    : network.type === "unknown" ? "network"
+    : !fullScoreSupported ? "threat_coverage" : undefined;
+  const score = scoreWithLimit(risk, limit);
   return {
     modelVersion: PURITY_MODEL_VERSION,
     coverage,
-    score,
-    status: conflict ? "conflict" : score === null ? "insufficient" : "scored",
+    ...score,
+    status: conflict ? "conflict" : score.reservedPoints > 0 ? "insufficient" : "scored",
+    ...(limit ? { limit } : {}),
     checked: checks.length,
     independentSources: independent,
   };
@@ -622,6 +643,7 @@ export function assessRisk(input: ScoringInput): RiskAssessment {
   const valid = input.evidence.filter(
     (evidence) => eligibility.get(evidence.id) === "valid",
   );
+  const network = classifyNetwork(valid.filter(evidence => sourceById.get(evidence.sourceId)?.matched === true));
   const threats: WeightedThreat[] = valid
     .filter(isThreat)
     .map((evidence) => {
@@ -684,7 +706,7 @@ export function assessRisk(input: ScoringInput): RiskAssessment {
   for (const evidence of valid) {
     const type =
       evidence.attribute ??
-      (evidence.category === "network" ? evidence.networkType : undefined);
+      (evidence.category === "network" && evidence.networkType === network.type ? network.type : undefined);
     if (!type || (hasRelay && (type === "cloud" || type === "hosting")))
       continue;
     const amount = CONTEXT[type as keyof typeof CONTEXT];
@@ -747,7 +769,7 @@ export function assessRisk(input: ScoringInput): RiskAssessment {
   const assessable = hasThreatEvidence || context > 0 || completedRiskChecks.length > 0;
   const indicators = makeIndicators(input, valid, eligibility, address.family, now);
   const hasConflict =
-    indicators.some((indicator) => indicator.state === "conflict") ||
+    network.conflict || indicators.some((indicator) => indicator.state === "conflict") ||
     input.evidence.some(
       (evidence) =>
         eligibility.get(evidence.id) === "invalid" &&
@@ -769,7 +791,6 @@ export function assessRisk(input: ScoringInput): RiskAssessment {
         (category) => THREAT_WEIGHTS[category as SignalCategory] !== undefined,
       ),
   );
-  const knownNetwork = [...valid].sort((a,b) => a.id.localeCompare(b.id)).find(e => e.category === "network" && e.networkType && e.networkType !== "unknown")?.networkType;
   const networkLabels: Record<string, LocalizedText> = {
     hosting: text("数据中心 / 托管网络", "a datacenter / hosting network"),
     cloud: text("云服务网络", "a cloud network"),
@@ -778,7 +799,7 @@ export function assessRisk(input: ScoringInput): RiskAssessment {
     business: text("企业网络", "a business network"),
     education: text("教育网络", "an education network"),
   };
-  const networkSummary = knownNetwork ? networkLabels[knownNetwork] : undefined;
+  const networkSummary = networkLabels[network.type];
   const summary = hasThreatEvidence
     ? text(
         "该地址命中公开威胁情报。参考指数由具体类别、来源质量与活动时效生成；记录不代表当前使用者正在从事恶意行为，也不是欺诈概率。",
@@ -799,7 +820,7 @@ export function assessRisk(input: ScoringInput): RiskAssessment {
     scoreKind: assessable ? "evidence" : "insufficient",
     riskLevel: assessable ? purityTier(100 - score)!.assessmentLevel : "insufficient",
     confidence,
-    networkType: input.networkType,
+    networkType: network.type,
     attributes: [...new Set(input.attributes)].sort(),
     hasThreatEvidence,
     scoreDetails: (assessable ? details : []).map((detail) => ({

@@ -5,6 +5,9 @@ dist/
 data/downloads/
 data/cache/
 data/generated/
+data/.refresh.lock
+data/.staging-*/
+data/.previous-*/
 docs/brand/source/
 test-results/
 reports/

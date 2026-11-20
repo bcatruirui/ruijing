@@ -815,6 +815,7 @@ describe("asset privacy, capabilities and partial failure", () => {
     for (const path of [
       "/",
       "/index.html",
+      "/privacy/",
       "/favicon.svg",
       "/robots.txt",
       "/assets/app-AbCd1234.js",
@@ -822,7 +823,9 @@ describe("asset privacy, capabilities and partial failure", () => {
       expect(
         (await h.handleRequest(new Request(ORIGIN + path), h.env)).status,
       ).toBe(200);
-    expect(h.calls).toHaveLength(5);
+    expect(h.calls).toEqual([
+      "/index.html", "/index.html", "/index.html", "/favicon.svg", "/robots.txt", "/assets/app-AbCd1234.js",
+    ]);
   });
 
   it("returns capability summaries without reading/returning the intelligence library", async () => {
