@@ -672,6 +672,28 @@ describe("trusted self address and honest deployment state", () => {
     for (const field of ["country", "region", "latitude", "longitude", "postalCode", "timezone", "geoUpdatedAt"] as const) expect(result.info[field]).toBeUndefined();
   });
 
+  it("serves bodyless GET self and echo only to the configured app origin", async () => {
+    const h = await harness([], false);
+    const allowed = "https://ruijing.example";
+    const env = { ...h.env, ALLOWED_APP_ORIGINS: JSON.stringify([allowed]) };
+    for (const path of ["/api/echo", "/api/self"]) {
+      const request = new Request(ORIGIN + path, { headers: {
+        Origin: allowed, "Sec-Fetch-Site": "cross-site", "CF-Connecting-IP": "8.8.8.8",
+      } });
+      Object.defineProperty(request, "cf", { value: { country: "CN" } });
+      const response = await h.handleRequest(request, env);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("Access-Control-Allow-Origin")).toBe(allowed);
+      expect(response.headers.get("Cache-Control")).toBe("no-store");
+      const result = await response.json();
+      expect(path === "/api/self" ? result.info.ip : result.ip).toBe("8.8.8.8");
+      if (path === "/api/echo") expect(h.calls).toEqual([]);
+      const denied = await h.handleRequest(new Request(ORIGIN + path, { headers: { Origin: `${allowed}.example` } }), env);
+      expect(denied.status).toBe(403);
+      expect(denied.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    }
+  });
+
   it("keeps the complete local location record when edge country metadata is unavailable", async () => {
     const h = await harness([{
       source: makeSource("geo", { categories: ["geo"] }),

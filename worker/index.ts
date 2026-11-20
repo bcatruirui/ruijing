@@ -134,7 +134,7 @@ export async function handleRequest(
   const origin = request.headers.get("Origin");
   const methods: Record<string, string[]> = {
     "/api/capabilities": ["GET"],
-    "/api/self": ["POST"],
+    "/api/self": ["GET", "POST"],
     "/api/lookup": ["POST"],
     "/api/echo": ["GET", "POST"],
     "/api/dns/start": ["POST"],
@@ -142,11 +142,12 @@ export async function handleRequest(
     "/api/dns/delete": ["POST"],
   };
   const allowedMethods = methods[path];
-  const allowlist = config<unknown>(
-    path === "/api/echo" ? env.ALLOWED_ECHO_ORIGINS : env.ALLOWED_APP_ORIGINS, [],
-  );
+  const appOrigins = config<unknown>(env.ALLOWED_APP_ORIGINS, []);
+  const echoOrigins = config<unknown>(env.ALLOWED_ECHO_ORIGINS, []);
+  const appOrigin = Array.isArray(appOrigins) && appOrigins.includes(origin);
+  const echoOrigin = Array.isArray(echoOrigins) && echoOrigins.includes(origin);
   const crossOrigin = Boolean(allowedMethods && origin && origin !== "null" &&
-    Array.isArray(allowlist) && allowlist.includes(origin));
+    (path === "/api/echo" ? echoOrigin || (request.method === "GET" && appOrigin) : appOrigin));
   if (origin && origin !== url.origin && !crossOrigin)
     return json({ error: "ORIGIN_NOT_ALLOWED" }, 403, { Vary: "Origin" });
   if (request.headers.get("Sec-Fetch-Site") === "cross-site" && !crossOrigin)
@@ -273,40 +274,43 @@ async function handleApi(request: Request, env: Env, path: string, crossOrigin: 
         200,
       );
     }
-    if (request.method !== "POST")
-      return json({ error: "METHOD_NOT_ALLOWED" }, 405, { Allow: "POST" });
-    if (!request.headers.get("content-type")?.startsWith("application/json"))
-      return json({ error: "JSON_REQUIRED" }, 415);
-    if (Number(request.headers.get("content-length") || 0) > 1024)
-      return json({ error: "BODY_TOO_LARGE" }, 413);
-    const reader = request.body?.getReader();
-    let size = 0;
-    const chunks: Uint8Array[] = [];
-    if (reader) {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        size += value.length;
-        if (size > 1024) {
-          await reader.cancel();
-          return json({ error: "BODY_TOO_LARGE" }, 413);
+    const selfGet = path === "/api/self" && request.method === "GET";
+    if (!selfGet && request.method !== "POST")
+      return json({ error: "METHOD_NOT_ALLOWED" }, 405, { Allow: path === "/api/lookup" ? "POST" : "GET, POST" });
+    let body: { ip?: unknown } = {};
+    if (!selfGet) {
+      if (!request.headers.get("content-type")?.startsWith("application/json"))
+        return json({ error: "JSON_REQUIRED" }, 415);
+      if (Number(request.headers.get("content-length") || 0) > 1024)
+        return json({ error: "BODY_TOO_LARGE" }, 413);
+      const reader = request.body?.getReader();
+      let size = 0;
+      const chunks: Uint8Array[] = [];
+      if (reader) {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          size += value.length;
+          if (size > 1024) {
+            await reader.cancel();
+            return json({ error: "BODY_TOO_LARGE" }, 413);
+          }
+          chunks.push(value);
         }
-        chunks.push(value);
       }
-    }
-    const joined = new Uint8Array(size);
-    let offset = 0;
-    for (const c of chunks) {
-      joined.set(c, offset);
-      offset += c.length;
-    }
-    let body: { ip?: unknown };
-    try {
-      body = JSON.parse(new TextDecoder().decode(joined) || "{}");
-      if (!body || Array.isArray(body) || typeof body !== "object")
-        throw new Error();
-    } catch {
-      return json({ error: "INVALID_JSON" }, 400);
+      const joined = new Uint8Array(size);
+      let offset = 0;
+      for (const c of chunks) {
+        joined.set(c, offset);
+        offset += c.length;
+      }
+      try {
+        body = JSON.parse(new TextDecoder().decode(joined) || "{}");
+        if (!body || Array.isArray(body) || typeof body !== "object")
+          throw new Error();
+      } catch {
+        return json({ error: "INVALID_JSON" }, 400);
+      }
     }
     const cf = (request as Request & { cf?: Record<string, unknown> }).cf;
     if (

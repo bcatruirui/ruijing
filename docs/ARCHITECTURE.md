@@ -18,9 +18,9 @@ flowchart LR
 | 接口                                | 请求                                     | 响应与用途                                                             |
 | ----------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------- |
 | `GET /api/capabilities`             | 无 IP 参数                               | 数据版本、来源状态、可选服务与节点配置；不含完整索引                   |
-| `POST /api/self`                    | JSON `{}`                                | Cloudflare 可信当前连接的真实公网 IP 与报告；本地预览缺元数据返回受限  |
+| `GET /api/self` 或 `POST /api/self` | GET 无参数；POST JSON `{}`                | Cloudflare 可信当前连接的真实公网 IP 与报告；页面使用 GET 减少跨域预检 |
 | `POST /api/lookup`                  | JSON `{ "ip": "有效公网 IPv4 或 IPv6" }` | `IpReport`：归属、参考分数、可信度、证据、来源与时间                   |
-| `GET /api/echo` 或 `POST /api/echo` | GET 无参数；POST JSON `{}`               | 本接口实际 HTTP 出口与地址族；同样要求可信边缘信息。GET 可用于受控节点 |
+| `GET /api/echo` 或 `POST /api/echo` | GET 无参数；POST JSON `{}`               | 直接读取可信边缘的公网出口，不读取情报库。完整报告较慢时，前端使用 GET 先显示地址 |
 | `POST /api/dns/start`               | JSON `{}`                                | 可选 DNS 会话 ID、秘密、4 个随机探测 URL 与过期时间                    |
 | `POST /api/dns/results`             | JSON `{ "id": "…", "secret": "…" }`      | 本次观察到的递归解析器；不能仅凭国家/ASN 差异判泄漏                    |
 | `POST /api/dns/delete`              | 与 results 相同                          | 清理临时会话；最长 180 秒自动过期是后备保护                            |

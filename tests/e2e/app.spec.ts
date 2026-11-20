@@ -24,6 +24,7 @@ test("a stalled automatic check times out, can be retried, and ignores a late re
   let stalled = true;
   await page.clock.install();
   await page.route("**/api/capabilities", route => route.abort());
+  await page.route("**/api/echo", route => route.fulfill({ json: { ip: "1.0.0.1", family: 4 } }));
   await page.route("**/api/self", async route => {
     if (stalled) {
       await delayed;
@@ -35,14 +36,19 @@ test("a stalled automatic check times out, can be retried, and ignores a late re
   try {
     const started = page.waitForRequest("**/api/self");
     await page.goto("/");
-    await started;
+    expect((await started).method()).toBe("GET");
     const score = page.getByRole("region", { name: "IP 纯净值" });
     await expect(score).toHaveAttribute("aria-busy", "true");
     await page.getByRole("textbox", { name: "查询公网 IP" }).fill("1.1.1.1");
     await expect(page.getByRole("button", { name: "查询 IP", exact: true })).toBeEnabled();
-    await page.clock.fastForward(8_100);
+    await page.clock.fastForward(3_100);
+    await expect(page.locator(".ip-address")).toHaveText("1.0.0.1");
+    await expect(page.getByText("已读取公网 IP，报告加载中")).toBeVisible();
+    await page.clock.fastForward(9_100);
     await expect(page.getByRole("status").filter({ hasText: "检测连接超时" })).toBeVisible();
     await expect(score).toHaveAttribute("aria-busy", "false");
+    await expect(page.locator(".ip-address")).toHaveText("1.0.0.1");
+    await expect(score.locator(".purity-number strong")).toHaveText("—");
     stalled = false;
     await page.getByRole("button", { name: "重试检测", exact: true }).click();
     await expect(page.locator(".ip-address")).toHaveText("8.8.8.8");

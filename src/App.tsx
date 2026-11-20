@@ -34,6 +34,7 @@ import type {
   LocalizedText,
 } from "../shared/contracts.ts";
 import { PURITY_TIERS } from "../shared/purity-scale.ts";
+import { parseIp } from "../shared/ip.ts";
 import { NetworkTools } from "./components/NetworkTools.tsx";
 import { IpDiagnostics } from "./components/IpDiagnostics.tsx";
 import { BrandMark } from "./components/BrandMark.tsx";
@@ -115,7 +116,8 @@ const threatCategories = new Set([
   "spam",
   "other_abuse",
 ]);
-const CHECK_TIMEOUT_MS = 8_000;
+const CHECK_TIMEOUT_MS = 12_000;
+const SLOW_SELF_CHECK_MS = 3_000;
 export function App() {
   const [lang, setLang] = useState<Lang>(() =>
       readPreference("ruijing-language", "zh") === "en" ? "en" : "zh",
@@ -126,6 +128,7 @@ export function App() {
     });
   const [caps, setCaps] = useState<Capabilities | null>(null),
     [report, setReport] = useState<IpReport | null>(null),
+    [egress, setEgress] = useState<Pick<IpReport["info"], "ip" | "family"> | null>(null),
     [input, setInput] = useState(""),
     [hidden, setHidden] = useState(false),
     [loading, setLoading] = useState(true),
@@ -202,6 +205,7 @@ export function App() {
     };
   }, []);
   useEffect(() => {
+    void query();
     const capabilityRequest = new AbortController();
     const timeout = setTimeout(() => capabilityRequest.abort(), CHECK_TIMEOUT_MS);
     apiFetch("/api/capabilities", { signal: capabilityRequest.signal })
@@ -224,7 +228,6 @@ export function App() {
       })
       .catch(() => {})
       .finally(() => clearTimeout(timeout));
-    void query();
     return () => {
       clearTimeout(timeout);
       capabilityRequest.abort();
@@ -280,6 +283,7 @@ export function App() {
     setDnsProgress(null);
     setAlternate(null);
     setReport(null);
+    setEgress(null);
     setError("");
     return id;
   }
@@ -295,6 +299,19 @@ export function App() {
     controller.current = ac;
     queriedIp.current = ip;
     setLoading(true);
+    const slowCheck = ip ? undefined : setTimeout(async () => {
+      if (id !== sequence.current || ac.signal.aborted) return;
+      try {
+        const response = await apiFetch("/api/echo", { signal: ac.signal });
+        if (!response.ok) return;
+        const body = await response.json();
+        const address = typeof body?.ip === "string" ? parseIp(body.ip) : null;
+        if (id === sequence.current && !ac.signal.aborted && address?.isPublic && address.family === body.family)
+          setEgress({ ip: address.canonical, family: address.family });
+      } catch {
+        // The full report request may still succeed independently.
+      }
+    }, SLOW_SELF_CHECK_MS);
     const timeout = setTimeout(() => {
       if (id !== sequence.current || ac.signal.aborted) return;
       ac.abort();
@@ -302,13 +319,12 @@ export function App() {
       setLoading(false);
     }, CHECK_TIMEOUT_MS);
     try {
-      const r = await apiFetch(ip ? "/api/lookup" : "/api/self", {
+      const r = ip ? await apiFetch("/api/lookup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(ip ? { ip } : {}),
-        cache: "no-store",
+        body: JSON.stringify({ ip }),
         signal: ac.signal,
-      });
+      }) : await apiFetch("/api/self", { signal: ac.signal });
       const body = await r.json().catch(() => null);
       if (!r.ok) throw new Error(body?.message || (r.status === 429
         ? t("检测请求过多，请稍后重试", "Too many checks. Try again shortly.")
@@ -317,6 +333,7 @@ export function App() {
         if (body?.mode !== (ip ? "lookup" : "self") || !body.info || !body.assessment)
           throw new Error(t("检测响应无效", "Invalid report response"));
         setReport(body);
+        setEgress(null);
       }
     } catch (e) {
       if (!ac.signal.aborted && id === sequence.current) {
@@ -326,7 +343,9 @@ export function App() {
         setReport(null);
       }
     } finally {
+      clearTimeout(slowCheck);
       clearTimeout(timeout);
+      ac.abort();
       if (id === sequence.current) {
         controller.current = null;
         setLoading(false);
@@ -395,10 +414,11 @@ export function App() {
     }
   }
   const manualLoading = loading && queriedIp.current !== undefined;
-  const visibleIp = report
+  const connection = report?.info ?? egress;
+  const visibleIp = connection
     ? hidden
       ? "•••• · •••• · ••••"
-      : report.info.ip
+      : connection.ip
     : loading
       ? t("正在读取连接…", "Reading connection…")
       : error ? t("未获取检测结果", "No check result") : t("等待公网 IP", "Awaiting a public IP");
@@ -556,9 +576,10 @@ export function App() {
           <div className="result-identity-main">
             <span className="eyebrow"><Globe2 size={15} />{report?.mode === "lookup" ? t("查询结果", "IP lookup") : t("当前连接", "Current connection")}</span>
             <div className="ip-address">{visibleIp}</div>
+            {egress && !report && <span className="muted">{loading ? t("已读取公网 IP，报告加载中", "Public IP found. Loading report") : t("已读取公网 IP，报告未完成", "Public IP found. Report incomplete")}</span>}
           </div>
           <div className="ip-facts">
-            {report && <span className="result-family">IPv{report.info.family}</span>}
+            {connection && <span className="result-family">IPv{connection.family}</span>}
             {report?.info.city && <span>{report.info.city}</span>}
             <CountryFlag code={report?.info.countryCode} name={country} />
           </div>
@@ -569,9 +590,9 @@ export function App() {
               aria-label={hidden ? t("显示 IP", "Show IP") : t("隐藏 IP", "Hide IP")}>
               {hidden ? <EyeOff size={16} /> : <Eye size={16} />}
             </button>
-            <button className="icon-button" disabled={!report || hidden}
+            <button className="icon-button" disabled={!connection || hidden}
               aria-label={t("复制 IP", "Copy IP")}
-              onClick={() => report && void copy(report.info.ip)}><Clipboard size={16} /></button>
+              onClick={() => connection && void copy(connection.ip)}><Clipboard size={16} /></button>
           </div>
         </section>
         <section className="panel purity-panel" data-risk={view?.riskTier ?? undefined} data-provisional={view?.provisional || undefined} aria-label={t("IP 纯净值", "IP purity score")} aria-busy={loading}>

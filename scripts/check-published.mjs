@@ -58,6 +58,15 @@ if (process.argv.includes("--candidate")) {
     const report = await self.json();
     if (report.mode !== "self" || !parseIp(report.info?.ip)?.isPublic || report.assessment?.datasetVersion !== published.datasetVersion)
       throw new Error("Published self detection has missing or inconsistent edge metadata");
+    for (const route of ["/api/self", "/api/echo"]) {
+      const response = await request(route, { headers });
+      if (!response.ok || response.headers.get("Access-Control-Allow-Origin") !== origin || !response.headers.get("Cache-Control")?.includes("no-store"))
+        throw new Error(`Published direct ${route} failed`);
+      const result = await response.json();
+      const ip = route === "/api/self" ? result.info?.ip : result.ip;
+      if (!parseIp(ip)?.isPublic || (route === "/api/self" && result.mode !== "self"))
+        throw new Error(`Published direct ${route} has missing edge metadata`);
+    }
   }
   console.log(`Published snapshot ${published.datasetVersion} passed its health checks.`);
 }
