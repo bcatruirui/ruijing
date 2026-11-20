@@ -4,6 +4,7 @@
   "main": "worker/index.ts",
   "compatibility_date": "2026-10-28",
   "workers_dev": true,
+  "routes": [{ "pattern": "api-ip.ruirui.uk", "custom_domain": true }],
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
@@ -22,7 +23,7 @@
     "ROUTING_NODES": "[]",
     "FAMILY_ENDPOINTS": "{}",
     "ALLOWED_ECHO_ORIGINS": "[]",
-    "ALLOWED_APP_ORIGINS": "[]",
+    "ALLOWED_APP_ORIGINS": "[\"https://ip.ruirui.uk\",\"https://bcatruirui.github.io\"]",
     "DNS_PUBLIC_VERIFIED": "false",
     "USE_BUNDLED_SNAPSHOT": "true",
   },

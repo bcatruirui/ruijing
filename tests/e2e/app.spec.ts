@@ -15,6 +15,45 @@ test("capability API failure preserves the basic report and shows unknown servic
   await expect(page.locator("#dns")).toContainText("配置状态未知");
   expect(errors).toEqual([]);
 });
+
+test("a stalled automatic check times out, can be retried, and ignores a late report", async ({ page, request }) => {
+  const selfReport = { ...(await (await request.post("/api/lookup", { data: { ip: "8.8.8.8" } })).json()), mode: "self" };
+  const lateReport = { ...selfReport, info: { ...selfReport.info, ip: "8.8.4.4" } };
+  let release!: () => void;
+  const delayed = new Promise<void>(resolve => { release = resolve; });
+  let stalled = true;
+  await page.clock.install();
+  await page.route("**/api/capabilities", route => route.abort());
+  await page.route("**/api/self", async route => {
+    if (stalled) {
+      await delayed;
+      await route.fulfill({ json: lateReport }).catch(() => {});
+    } else {
+      await route.fulfill({ json: selfReport });
+    }
+  });
+  try {
+    const started = page.waitForRequest("**/api/self");
+    await page.goto("/");
+    await started;
+    const score = page.getByRole("region", { name: "IP 纯净值" });
+    await expect(score).toHaveAttribute("aria-busy", "true");
+    await page.getByRole("textbox", { name: "查询公网 IP" }).fill("1.1.1.1");
+    await expect(page.getByRole("button", { name: "查询 IP", exact: true })).toBeEnabled();
+    await page.clock.fastForward(8_100);
+    await expect(page.getByRole("status").filter({ hasText: "检测连接超时" })).toBeVisible();
+    await expect(score).toHaveAttribute("aria-busy", "false");
+    stalled = false;
+    await page.getByRole("button", { name: "重试检测", exact: true }).click();
+    await expect(page.locator(".ip-address")).toHaveText("8.8.8.8");
+    release();
+    await page.unrouteAll({ behavior: "wait" });
+    await expect(page.locator(".ip-address")).toHaveText("8.8.8.8");
+  } finally {
+    release();
+  }
+});
+
 test("mock controlled nodes compare egress and global privacy hiding stays reactive", async ({
   page,
 }) => {

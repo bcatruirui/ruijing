@@ -115,6 +115,7 @@ const threatCategories = new Set([
   "spam",
   "other_abuse",
 ]);
+const CHECK_TIMEOUT_MS = 8_000;
 export function App() {
   const [lang, setLang] = useState<Lang>(() =>
       readPreference("ruijing-language", "zh") === "en" ? "en" : "zh",
@@ -146,6 +147,7 @@ export function App() {
   const [alternate, setAlternate] = useState<IpReport | null>(null);
   const sequence = useRef(0);
   const controller = useRef<AbortController | null>(null);
+  const queriedIp = useRef<string | undefined>(undefined);
   const dnsController = useRef<AbortController | null>(null);
   const alternateController = useRef<AbortController | null>(null);
   const t = (zh: string, en: string) => (lang === "zh" ? zh : en);
@@ -200,7 +202,9 @@ export function App() {
     };
   }, []);
   useEffect(() => {
-    apiFetch("/api/capabilities")
+    const capabilityRequest = new AbortController();
+    const timeout = setTimeout(() => capabilityRequest.abort(), CHECK_TIMEOUT_MS);
+    apiFetch("/api/capabilities", { signal: capabilityRequest.signal })
       .then((r) => {
         if (!r.ok) throw new Error("Capabilities unavailable");
         return r.json();
@@ -216,11 +220,14 @@ export function App() {
           !value.familyEndpoints
         )
           throw new Error("Invalid capabilities");
-        setCaps(value);
+        if (!capabilityRequest.signal.aborted) setCaps(value);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => clearTimeout(timeout));
     void query();
     return () => {
+      clearTimeout(timeout);
+      capabilityRequest.abort();
       ++sequence.current;
       controller.current?.abort();
       dnsController.current?.abort();
@@ -264,6 +271,7 @@ export function App() {
     dnsController.current?.abort();
     alternateController.current?.abort();
     controller.current = null;
+    queriedIp.current = undefined;
     dnsController.current = null;
     alternateController.current = null;
     setScan(id);
@@ -285,7 +293,14 @@ export function App() {
     const id = resetDetection();
     const ac = new AbortController();
     controller.current = ac;
+    queriedIp.current = ip;
     setLoading(true);
+    const timeout = setTimeout(() => {
+      if (id !== sequence.current || ac.signal.aborted) return;
+      ac.abort();
+      setError("检测连接超时，请重试。 / The check timed out. Please retry.");
+      setLoading(false);
+    }, CHECK_TIMEOUT_MS);
     try {
       const r = await apiFetch(ip ? "/api/lookup" : "/api/self", {
         method: "POST",
@@ -298,7 +313,7 @@ export function App() {
       if (!r.ok) throw new Error(body?.message || (r.status === 429
         ? t("检测请求过多，请稍后重试", "Too many checks. Try again shortly.")
         : t("检测服务暂不可用，请稍后重试", "The assessment service is temporarily unavailable.")));
-      if (id === sequence.current) {
+      if (id === sequence.current && !ac.signal.aborted) {
         if (body?.mode !== (ip ? "lookup" : "self") || !body.info || !body.assessment)
           throw new Error(t("检测响应无效", "Invalid report response"));
         setReport(body);
@@ -311,7 +326,11 @@ export function App() {
         setReport(null);
       }
     } finally {
-      if (id === sequence.current) setLoading(false);
+      clearTimeout(timeout);
+      if (id === sequence.current) {
+        controller.current = null;
+        setLoading(false);
+      }
     }
   }
   async function copy(value: string) {
@@ -375,13 +394,14 @@ export function App() {
       // A failed enrichment is not a location observation.
     }
   }
+  const manualLoading = loading && queriedIp.current !== undefined;
   const visibleIp = report
     ? hidden
       ? "•••• · •••• · ••••"
       : report.info.ip
     : loading
       ? t("正在读取连接…", "Reading connection…")
-      : t("等待公网 IP", "Awaiting a public IP");
+      : error ? t("未获取检测结果", "No check result") : t("等待公网 IP", "Awaiting a public IP");
   const country =
     report?.info.country || countryLabel(report?.info.countryCode, lang);
   const sources = a?.sources || caps?.sources || [];
@@ -494,9 +514,9 @@ export function App() {
           <button
             type="submit"
             className="button primary"
-            disabled={loading || !input.trim()}
+            disabled={manualLoading || !input.trim()}
           >
-            {loading ? (
+            {manualLoading ? (
               <LoaderCircle className="spin" size={15} />
             ) : (
               <Search size={15} />
@@ -516,26 +536,18 @@ export function App() {
           </button>
         </form>
         {error && (
-          <div className="api-notice" role="status">
-            <Info size={18} />
+          <div className="api-notice">
+            <Info size={18} aria-hidden="true" />
             <div>
-              <strong>
-                {caps?.development
-                  ? t("本地预览模式", "Local preview mode")
-                  : t("当前连接暂不可用", "Connection currently unavailable")}
-              </strong>
-              <p>
-                {error.includes(" / ")
-                  ? error.split(" / ")[lang === "zh" ? 0 : 1]
-                  : error}
-              </p>
-              {caps?.development && (
-                <span>
-                  {t(
-                    "可直接输入公网 IP，使用已构建的真实离线情报进行分析。",
-                    "Enter a public IP above to analyze it using the real offline snapshots.",
-                  )}
-                </span>
+              <div role="status">
+                <strong>{caps?.development ? t("本地预览模式", "Local preview mode") : t("检测未完成", "Check incomplete")}</strong>
+                <p>{error.includes(" / ") ? error.split(" / ")[lang === "zh" ? 0 : 1] : error}</p>
+                {caps?.development && <span>{t("可直接输入公网 IP，使用已构建的真实离线情报进行分析。", "Enter a public IP above to analyze it using the real offline snapshots.")}</span>}
+              </div>
+              {!caps?.development && (
+                <button type="button" className="text-button" onClick={() => void query(queriedIp.current)}>
+                  <RefreshCw size={14} aria-hidden="true" />{t("重试检测", "Retry check")}
+                </button>
               )}
             </div>
           </div>
@@ -568,7 +580,7 @@ export function App() {
             <div className="purity-number"><strong>{purity ?? "—"}</strong><span>/ 100</span></div>
           </div>
           <div className="purity-meta">
-            <strong className="purity-grade">{loading ? t("正在检测", "Checking") : view?.scoreState ?? t("等待检测", "Awaiting a check")}</strong>
+            <strong className="purity-grade">{loading ? t("正在检测", "Checking") : view?.scoreState ?? (error ? t("检测未完成", "Check incomplete") : t("等待检测", "Awaiting a check"))}</strong>
             {!!view?.scoreDeductions.length && <ul className="purity-deductions">
               {view.scoreDeductions.map(deduction => <li key={deduction}>{deduction}</li>)}
             </ul>}
